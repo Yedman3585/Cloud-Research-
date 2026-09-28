@@ -24,7 +24,8 @@ def main():
     environment = ROOT / ".venv"
     if not environment.exists():
         venv.EnvBuilder(with_pip=True).create(environment)
-    python = environment / "bin/python"
+    # Windows venvs put executables in Scripts\, POSIX venvs in bin/.
+    python = environment / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
     subprocess.run([str(python), "-m", "pip", "install", "--no-cache-dir", "-e", str(ROOT)], check=True)
     subprocess.run([str(python), str(ROOT / "scripts/ifogsim.py"), "build"], check=True)
     subprocess.run([str(python), "-m", "fogids.cli", "doctor"], cwd=ROOT, check=True)

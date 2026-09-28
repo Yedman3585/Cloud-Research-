@@ -24,7 +24,8 @@ def build():
         shutil.rmtree(CLASSES)
     CLASSES.mkdir(parents=True, exist_ok=True)
     argfile = CLASSES.parent / "sources.txt"
-    argfile.write_text("\n".join('"' + str(p) + '"' for p in sources) + "\n")
+    # Forward slashes: javac @argfiles treat backslashes inside quotes as escapes (Windows paths).
+    argfile.write_text("\n".join('"' + p.as_posix() + '"' for p in sources) + "\n")
     # The upstream v2.0.0 GUI sources contain non-UTF-8 bytes.
     subprocess.run(["javac", "-encoding", "ISO-8859-1", "-cp", classpath(),
                     "-d", str(CLASSES), "@" + str(argfile)], cwd=SOURCE, check=True)

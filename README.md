@@ -162,6 +162,15 @@ fogids doctor
 fogids ids-demo
 ```
 
+On Windows (PowerShell), with JDK 17 first on `PATH`:
+
+```powershell
+python scripts\bootstrap.py
+.venv\Scripts\fogids doctor
+.venv\Scripts\fogids ids-demo
+.venv\Scripts\python -m unittest discover -s tests -v
+```
+
 The upstream commit checked during setup,
 `5f68d3947e450d8d2b4af42670be819206be68c9`, includes CloudSim 7 integration and
 requires APIs unavailable on Java 17, such as `List.getLast()`. This project therefore
@@ -185,6 +194,55 @@ fogids run --class-name org.fog.test.perfeval.VRGameFog --timeout 120
 `fogids run` launches `VRGameFog` and writes `artifacts/VRGameFog.log`.
 It is separate from the IDS experiment. `ids-demo` compiles the local Java adapter
 automatically and builds upstream classes if they are missing.
+
+## Verified Runs (September 2026)
+
+The Python-to-iFogSim bridge was verified end to end on two platforms: bootstrap
+(clone of iFogSim v2.0.0 and compilation of 327 upstream sources), `fogids doctor`,
+all 10 tests, and `fogids ids-demo` with the default configuration.
+
+| Platform | Python | JDK | Bootstrap and doctor | Tests |
+|---|---|---|---|---|
+| Windows 11, PowerShell | 3.14.6 | Temurin 17.0.20.1 | OK | 10/10 |
+| Linux (cloud workspace) | 3.11.15 | OpenJDK 21.0.10 | OK | 10/10 |
+
+The macOS workflow above is unchanged. On Windows, JDK 17 was placed first on
+`PATH` for the session because another JDK (23) was the system default:
+
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot"
+$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+```
+
+Two cross-platform fixes were required: `bootstrap.py` uses `.venv\Scripts\python.exe`
+on Windows, and `scripts/ifogsim.py` writes forward-slash paths to the javac argument
+file, because javac treats backslashes inside quoted argfile entries as escapes.
+
+`ids-demo` results (6 tasks, seed 7; deadline misses out of 6):
+
+| Mode | Linux: assignment | Linux: misses | Windows: assignment | Windows: misses |
+|---|---|---|---|---|
+| `greedy` | [1,1,0,2,2,2] | 5 | [1,1,0,2,2,2] | 5 |
+| `qubo_sa` | [2,1,1,2,0,2] | 3 | [1,2,0,2,1,2] | 1 |
+| `greedy_with_delay` | same as greedy | 6 | same as greedy | 6 |
+| `qubo_sa_with_delay` | same as qubo_sa | 6 | same as qubo_sa | 6 |
+
+Observations:
+
+- **SA is seeded but not reproducible across platforms.** With the same seed, SA returned
+  surrogate 14.585 on Linux and the exact-oracle optimum 14.580 on Windows. The likely
+  cause is a different Python version (3.11 vs 3.14). Future work: a version-stable RNG
+  (for example NumPy PCG64) and recording interpreter and JDK versions in `summary.json`.
+- **Decision time dominates.** Pure-Python SA took 0.35 s (Linux) and 0.50 s (Windows),
+  which erased the placement gain: all six deadlines are missed in `qubo_sa_with_delay`.
+- **The surrogate is a weak proxy for simulated outcomes.** Simulating all 48 feasible
+  assignments in iFogSim gave a Spearman correlation between surrogate and deadline
+  misses of 0.01 (0.13 for priority-weighted latency). An assignment with zero misses
+  exists but ranks 15th of 48 by surrogate; the surrogate optimum itself misses one
+  deadline. Shared uplink queues are not modelled in the surrogate.
+- **Deadlines lie on the boundary.** Tasks 2 and 4 finish exactly at their deadlines, so a
+  0.15 ms decision delay changes greedy from 5 to 6 misses. A single instance is therefore
+  not evidence; randomized instances and multiple seeds are needed.
 
 ## Repository Structure
 
