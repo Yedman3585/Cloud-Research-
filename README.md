@@ -35,14 +35,47 @@ fogids ids-demo --config configs/ids-small.json --output artifacts/my-run
 Rerunning into the same output directory overwrites files with the same names.
 The tiny exact-oracle demo accepts 1–8 tasks and the fixed edge → fog → cloud topology.
 
+### IDS-PLACE Instances
+
+The research problem, **IDS-PLACE** (risk-aware online placement of DL-based IDS
+inference under attack bursts), is specified in [docs/ids-place.md](docs/ids-place.md).
+A seeded generator builds instances: an edge-fog-cloud tree, IDS model variants and a
+stream of feature-window tasks with synthetic attack bursts. Model costs are
+uncalibrated placeholders for now.
+
+```bash
+fogids generate --config configs/ids-place-small.json   # artifacts/instances/*.json
+fogids describe artifacts/instances/ids-place-small-s11.json
+```
+
+Instances run online in iFogSim through an epoch-based Java-Python bridge
+(`org.fogids.IdsOnline` + [`bridge.py`](src/fogids/bridge.py)). At every epoch with new
+tasks, Java sends a state snapshot as a JSON line and waits while a Python policy
+decides; simulated time stands still meanwhile, and decision time can be charged to
+the clock (`--decision-time none|measured|<seconds>`). Four reference policies are
+included: `edge-light`, `fog-full`, `cloud-full` and `greedy-finish`.
+
+```bash
+fogids simulate --config configs/ids-place-small.json   # artifacts/runs/<instance>/
+fogids simulate --config configs/ids-place-medium.json --policy greedy-finish --decision-time measured
+```
+
+Each run writes the instance, per-task CSV files, simulator logs, and `summary.json`
+with deadline-miss rates per risk class, latency percentiles, missed attack flows,
+energy, cloud cost and decision time.
+
 Run the tests:
 
 ```bash
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-The 10 tests cover QUBO expansion, feasible-assignment costs, bounded slack,
-seeded SA, configuration validation, and Java integration. Simulation checks
+The 34 tests cover QUBO expansion, feasible-assignment costs, bounded slack,
+seeded SA, configuration validation, Java integration, the IDS-PLACE problem model
+(eligibility, transfer and compute times, validation), and the instance generator
+(determinism, a cross-platform fingerprint, burst and chunking behaviour), and the
+online bridge against analytic timings (epoch boundaries, transfer plus compute,
+cold starts, CPU sharing, decision delay, snapshot state, invalid assignments). Simulation checks
 include local compute time, cloud network transfer, shared CPU execution,
 decision delay, and unfinished tasks.
 
@@ -247,11 +280,15 @@ Observations:
 ## Repository Structure
 
 ```text
-src/fogids/               Python CLI, QUBO, SA, exact oracle, experiment driver
-java/org/fogids/          Finite IDS inference batch on FogDevice
-configs/ids-small.json    Synthetic tasks, nodes, and SA budget
+src/fogids/               Python CLI, IDS-PLACE model, generator, online bridge, policies,
+                          metrics, QUBO, SA, oracle, demo driver
+java/org/fogids/IdsOnline.java  Epoch-based online IDS-PLACE driver for iFogSim
+java/org/fogids/IdsBatch.java   Finite IDS inference batch (minimal demo)
+configs/ids-small.json    Synthetic tasks, nodes, and SA budget (minimal demo)
+configs/ids-place-*.json  IDS-PLACE generator configs: small, medium, large
 configs/ifogsim.lock.json Pinned simulator version
 docs/ids-minimal.md       Equations, assumptions, and implementation notes (Russian)
+docs/ids-place.md         IDS-PLACE v1 problem specification
 tests/                   QUBO unit tests and Java integration tests
 scripts/ifogsim.py        Upstream Java build and launch wrapper
 scripts/bootstrap.py     Environment restoration

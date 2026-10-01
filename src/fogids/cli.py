@@ -19,7 +19,42 @@ def main():
     demo = sub.add_parser("ids-demo", help="Run a tiny QUBO placement experiment in iFogSim")
     demo.add_argument("--config", type=Path, default=ROOT / "configs/ids-small.json")
     demo.add_argument("--output", type=Path, default=ROOT / "artifacts/ids-small")
+    gen = sub.add_parser("generate", help="Generate an IDS-PLACE instance from a generator config")
+    gen.add_argument("--config", type=Path, default=ROOT / "configs/ids-place-small.json")
+    gen.add_argument("--output", type=Path, default=None)
+    gen.add_argument("--seed", type=int, default=None, help="Override the config seed")
+    desc = sub.add_parser("describe", help="Print load and size statistics of an instance file")
+    desc.add_argument("instance", type=Path)
+    sim = sub.add_parser("simulate", help="Run an IDS-PLACE instance online in iFogSim under policies")
+    source = sim.add_mutually_exclusive_group()
+    source.add_argument("--instance", type=Path, help="Instance JSON file")
+    source.add_argument("--config", type=Path, default=ROOT / "configs/ids-place-small.json",
+                        help="Generator config (used when --instance is not given)")
+    sim.add_argument("--seed", type=int, default=None)
+    sim.add_argument("--policy", action="append", default=None,
+                     help="greedy-finish or <edge|fog|cloud>-<model>; repeatable (default: four baselines)")
+    sim.add_argument("--decision-time", default="none", help="none, measured, or a fixed delay in seconds")
+    sim.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
+    if args.command == "simulate":
+        from .simulate import run_cli
+        return run_cli(args, ROOT)
+    if args.command == "generate":
+        from .generator import generate, load_config
+        config = load_config(args.config)
+        if args.seed is not None:
+            config["seed"] = args.seed
+        instance = generate(config)
+        output = args.output or ROOT / "artifacts/instances" / f"{config['name']}-s{config['seed']}.json"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        instance.save(output)
+        print(json.dumps(instance.summary(), indent=2))
+        print(f"Instance: {output}")
+        return 0
+    if args.command == "describe":
+        from .problem import Instance
+        print(json.dumps(Instance.load(args.instance).summary(), indent=2))
+        return 0
     if args.command == "ids-demo":
         from .experiment import run as run_experiment
         run_experiment(args.config, args.output)

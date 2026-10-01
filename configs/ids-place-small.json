@@ -1,0 +1,119 @@
+{
+  "name": "ids-place-small",
+  "seed": 11,
+  "calibrated": false,
+  "_comment": "Model costs and recalls are uncalibrated placeholders until measured on CICIoT2023 (milestone M4).",
+  "horizon_s": 30.0,
+  "window_s": 1.0,
+  "epoch_s": 0.1,
+  "topology": {
+    "fog_nodes": 2,
+    "gateways_per_fog": 4,
+    "edge": {
+      "mips": 2000,
+      "memory_mb": 1024,
+      "uplink_bytes_s": 1250000,
+      "uplink_latency_s": 0.005,
+      "idle_w": 2.5,
+      "busy_w": 6.0,
+      "cost_per_gi": 0.0,
+      "resident": [
+        "light"
+      ]
+    },
+    "fog": {
+      "mips": 8000,
+      "memory_mb": 8192,
+      "uplink_bytes_s": 12500000,
+      "uplink_latency_s": 0.03,
+      "idle_w": 40.0,
+      "busy_w": 120.0,
+      "cost_per_gi": 0.0,
+      "resident": [
+        "light",
+        "full"
+      ]
+    },
+    "cloud": {
+      "mips": 64000,
+      "memory_mb": 65536,
+      "idle_w": 0.0,
+      "busy_w": 0.0,
+      "cost_per_gi": 0.002,
+      "resident": [
+        "light",
+        "full"
+      ]
+    }
+  },
+  "models": [
+    {
+      "name": "light",
+      "fixed_mi": 20,
+      "mi_per_flow": 0.5,
+      "memory_mb": 50,
+      "load_s": 0.2,
+      "recall": {
+        "ddos": 0.97,
+        "dos": 0.95,
+        "mirai": 0.96,
+        "recon": 0.7,
+        "spoofing": 0.65,
+        "web": 0.45,
+        "bruteforce": 0.5
+      }
+    },
+    {
+      "name": "full",
+      "fixed_mi": 100,
+      "mi_per_flow": 4.0,
+      "memory_mb": 400,
+      "load_s": 1.0,
+      "recall": {
+        "ddos": 0.995,
+        "dos": 0.99,
+        "mirai": 0.99,
+        "recon": 0.9,
+        "spoofing": 0.85,
+        "web": 0.75,
+        "bruteforce": 0.8
+      }
+    }
+  ],
+  "traffic": {
+    "benign_flows_per_s": 300,
+    "benign_jitter": 0.3,
+    "bytes_per_flow": 200,
+    "header_bytes": 512,
+    "max_flows_per_task": 1000,
+    "feature_s_per_flow": 2e-05
+  },
+  "risk": {
+    "prefilter_noise": 0.15,
+    "critical_gateways": 0.25,
+    "critical_weight": 3.0
+  },
+  "deadlines": {
+    "high_risk_threshold": 0.5,
+    "high_s": 0.3,
+    "low_s": 2.0
+  },
+  "attacks": [
+    {
+      "class": "ddos",
+      "start_s": 10.0,
+      "duration_s": 8.0,
+      "ramp_s": 1.0,
+      "gateways": 0.5,
+      "flows_per_s": 4000
+    },
+    {
+      "class": "recon",
+      "start_s": 22.0,
+      "duration_s": 4.0,
+      "ramp_s": 0.0,
+      "gateways": 0.25,
+      "flows_per_s": 400
+    }
+  ]
+}
