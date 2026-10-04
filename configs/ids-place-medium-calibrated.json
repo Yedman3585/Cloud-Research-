@@ -49,34 +49,34 @@
   "models": [
     {
       "name": "light",
-      "fixed_mi": 0.20471,
-      "mi_per_flow": 0.001197,
-      "memory_mb": 3,
-      "load_s": 0.0069,
+      "fixed_mi": 0.205694,
+      "mi_per_flow": 0.001194,
+      "memory_mb": 5,
+      "load_s": 0.0057,
       "recall": {
-        "ddos": 0.9999,
-        "dos": 0.9999,
+        "ddos": 1.0,
+        "dos": 1.0,
         "mirai": 1.0,
-        "recon": 0.8528,
-        "spoofing": 0.867,
-        "web": 0.894,
-        "bruteforce": 0.8361
+        "recon": 0.8549,
+        "spoofing": 0.8503,
+        "web": 0.8708,
+        "bruteforce": 0.8565
       }
     },
     {
       "name": "full",
-      "fixed_mi": 0.0,
-      "mi_per_flow": 1.015412,
-      "memory_mb": 114,
-      "load_s": 0.004,
+      "fixed_mi": 1.290782,
+      "mi_per_flow": 0.09873,
+      "memory_mb": 35,
+      "load_s": 0.0025,
       "recall": {
-        "ddos": 0.9999,
+        "ddos": 1.0,
         "dos": 1.0,
         "mirai": 1.0,
-        "recon": 0.857,
-        "spoofing": 0.87,
-        "web": 0.9007,
-        "bruteforce": 0.8428
+        "recon": 0.8436,
+        "spoofing": 0.8627,
+        "web": 0.9169,
+        "bruteforce": 0.9087
       }
     }
   ],

@@ -2,10 +2,12 @@
 
 Pipeline (each step can be run on its own; ``all`` runs them in order):
 
-  prepare  stream the CICIoT2023 CSV files and keep a capped, seeded sample per
-           original label, grouped into the seven IDS-PLACE attack classes + benign;
-  train    train the ``light`` (MLP) and ``full`` (CNN-LSTM) IDS models, record
-           per-class detection recall on a held-out test split;
+  prepare  read the CICIoT2023 CSV files and keep a capped, seeded sample of
+           contiguous blocks of records per original label, grouped into the seven
+           IDS-PLACE attack classes + benign;
+  train    train the ``light`` model (MLP on one flow record) and the ``full`` model
+           (GRU over the flow and the K-1 records before it at the same capture),
+           record per-class detection recall on held-out blocks;
   time     measure single-thread CPU inference time of one window as a function
            of the number of flows, plus cold-start time and memory, in a fresh
            process per model; fit time = fixed + per_flow * flows;
@@ -19,7 +21,9 @@ Conversion to simulator units: work [MI] = seconds on the reference core x
 measuring machine (default: the fog-node MIPS of the base configs, i.e. a fog node
 is modelled as one such core). Recall is *detection* recall: the fraction of
 flows of an attack class that the model flags as any attack, which is what the
-simulator's missed-detection metric uses.
+simulator's missed-detection metric uses. For ``full`` the reported recall is
+measured with part of the context replaced by unrelated records (``--eval-rho``),
+which stands for traffic of other hosts mixed in at the same gateway.
 
 Requires the optional dependencies: ``pip install -e '.[calibration]'``.
 """
@@ -54,6 +58,8 @@ _EXACT = {
 }
 _PREFIX = (('DDoS', 'ddos'), ('DoS', 'dos'), ('Mirai', 'mirai'), ('Recon', 'recon'))
 TIMING_FLOWS = (1, 2, 5, 10, 20, 50, 100, 200, 500, 1000)
+BLOCK = 200  # rows per contiguous block; blocks are the unit of sampling and splitting
+CONTEXT = 16  # records seen by the full model: the flow itself and the 15 before it
 
 
 # Pure helpers (no third-party imports) -------------------------------------
@@ -123,12 +129,14 @@ def file_label(path):
 
 
 def prepare(raw, out, cap, seed, drop=()):
-    """Sample at most ``cap`` rows per original label.
+    """Sample at most about ``cap`` rows per original label as contiguous blocks.
 
-    Two layouts are supported: the original release (shuffled ``part-*.csv`` files with a
-    ``label`` column) and the 2024 release (one folder per label, ``*.pcap.csv`` files
-    without a label column). In the second case each file of a label contributes a seeded
-    random subset of ceil(cap / files) rows, so that every capture file is represented.
+    Two layouts are supported. The 2024 release has one folder per label with
+    ``*.pcap.csv`` files in capture order and no label column; each file of a label
+    contributes randomly chosen, non-overlapping blocks of ``BLOCK`` consecutive rows
+    (about ceil(cap / files) rows), so the ``full`` model can see real context. The
+    original release (shuffled ``part-*.csv`` files with a ``label`` column) has no
+    usable order; there every row is its own block and only ``light`` can be trained.
     """
     import numpy as np
     import pandas as pd
@@ -139,23 +147,29 @@ def prepare(raw, out, cap, seed, drop=()):
     header = [c.strip() for c in pd.read_csv(files[0], nrows=0).columns]
     labelled = any(c.lower() == 'label' for c in header)
     columns = [c for c in header if c.lower() != 'label' and c not in drop]
-    kept, seen = {}, {}
+    parts, labels_out, blocks_out, seen = [], [], [], {}
+    next_block = 0
 
-    def take(label, frame, quota):
-        seen[label] = seen.get(label, 0) + len(frame)
-        room = min(quota, cap - sum(len(x) for x in kept.get(label, [])))
-        if room > 0:
-            rows = frame.iloc[rng.permutation(len(frame))[:room]]
-            kept.setdefault(label, []).append(rows[columns].to_numpy(np.float64))
+    def add(label, rows, block_ids):
+        parts.append(rows[columns].to_numpy(np.float32))
+        labels_out.extend([label] * len(rows))
+        blocks_out.append(block_ids)
 
     if labelled:
+        kept = {}
         for i, f in enumerate(files):
             for chunk in pd.read_csv(f, chunksize=200_000):
                 chunk.columns = [c.strip() for c in chunk.columns]
                 label_col = next(c for c in chunk.columns if c.lower() == 'label')
                 for label, rows in chunk.groupby(label_col, sort=True):
                     label_group(label)
-                    take(label, rows, cap)
+                    seen[label] = seen.get(label, 0) + len(rows)
+                    room = cap - kept.get(label, 0)
+                    if room > 0:
+                        rows = rows.iloc[rng.permutation(len(rows))[:room]]
+                        add(label, rows, np.arange(next_block, next_block + len(rows)))
+                        next_block += len(rows)
+                        kept[label] = kept.get(label, 0) + len(rows)
             print(f'[{i + 1}/{len(files)}] {f.name}')
     else:
         by_label = {}
@@ -166,25 +180,35 @@ def prepare(raw, out, cap, seed, drop=()):
         done = 0
         for label, group in sorted(by_label.items()):
             quota = math.ceil(cap / len(group))
+            kept = 0
             for f in (group[k] for k in rng.permutation(len(group))):
                 frame = pd.read_csv(f)
                 frame.columns = [c.strip() for c in frame.columns]
                 if [c for c in frame.columns if c not in drop] != columns:
                     raise SystemExit(f'{f}: feature columns differ from {files[0]}')
-                take(label, frame, quota)
+                seen[label] = seen.get(label, 0) + len(frame)
+                n_blocks = max(1, len(frame) // BLOCK)
+                take = min(n_blocks, math.ceil(min(quota, cap - kept) / BLOCK))
+                for b in sorted(rng.permutation(n_blocks)[:take]):
+                    rows = frame.iloc[b * BLOCK:(b + 1) * BLOCK if n_blocks > 1 else len(frame)]
+                    add(label, rows, np.full(len(rows), next_block))
+                    next_block += 1
+                    kept += len(rows)
                 done += 1
-            print(f'[{done}/{len(files)}] {label}: {sum(len(x) for x in kept.get(label, []))} rows kept '
-                  f'of {seen.get(label, 0)}')
-    labels = sorted(kept)
-    X = np.concatenate([np.concatenate(kept[l]) for l in labels]).astype(np.float32)
-    fine = np.concatenate([[l] * sum(len(x) for x in kept[l]) for l in labels])
+            print(f'[{done}/{len(files)}] {label}: {kept} rows kept of {seen[label]}')
+    X = np.concatenate(parts)
+    fine = np.array(labels_out)
+    block = np.concatenate(blocks_out).astype(np.int64)
     y = np.array([CLASSES.index(label_group(l)) for l in fine], dtype=np.int64)
     Path(out).parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(out, X=X, y=y, fine=fine, columns=np.array(columns))
+    np.savez_compressed(out, X=X, y=y, fine=fine, block=block, columns=np.array(columns),
+                        ordered=np.array(not labelled))
+    labels = sorted(set(labels_out))
     summary = {'files': len(files), 'layout': 'label column' if labelled else 'folder per label',
+               'ordered': not labelled, 'block_rows': BLOCK, 'blocks': int(next_block),
                'cap_per_label': cap, 'seed': seed, 'features': len(columns), 'columns': columns,
                'dropped': list(drop), 'rows': int(len(y)), 'seen_per_label': seen,
-               'kept_per_label': {l: sum(len(x) for x in kept[l]) for l in labels},
+               'kept_per_label': {l: int((fine == l).sum()) for l in labels},
                'kept_per_class': {c: int((y == k).sum()) for k, c in enumerate(CLASSES)}}
     _write_json(Path(out).with_suffix('.json'), summary)
     print(json.dumps(summary['kept_per_class'], indent=2))
@@ -195,7 +219,8 @@ def prepare(raw, out, cap, seed, drop=()):
 
 # Models ----------------------------------------------------------------------
 
-def build_model(kind, n_features, mean=None, std=None):
+def build_model(kind, n_features, mean=None, std=None, context=CONTEXT):
+    """``light``: MLP on one record, input (B, F). ``full``: GRU over (B, K, F), last = the flow."""
     import torch
     from torch import nn
 
@@ -212,6 +237,8 @@ def build_model(kind, n_features, mean=None, std=None):
             return (torch.sign(x) * torch.log1p(torch.abs(x)) - self.mean) / self.std
 
     class Light(nn.Module):
+        context = 1
+
         def __init__(self):
             super().__init__()
             self.norm = Normalize()
@@ -222,20 +249,20 @@ def build_model(kind, n_features, mean=None, std=None):
             return self.net(self.norm(x))
 
     class Full(nn.Module):
-        """1D-CNN over the feature vector followed by an LSTM over the pooled positions."""
+        """Record embedding, a GRU over the K records, and a head on [GRU state, current record]."""
 
         def __init__(self):
             super().__init__()
+            self.context = context
             self.norm = Normalize()
-            self.conv = nn.Sequential(nn.Conv1d(1, 32, 3, padding=1), nn.ReLU(),
-                                      nn.Conv1d(32, 64, 3, padding=1), nn.ReLU(), nn.MaxPool1d(2))
-            self.lstm = nn.LSTM(64, 64, batch_first=True)
-            self.head = nn.Sequential(nn.Linear(64, 64), nn.ReLU(), nn.Linear(64, len(CLASSES)))
+            self.embed = nn.Sequential(nn.Linear(n_features, 64), nn.ReLU())
+            self.gru = nn.GRU(64, 64, batch_first=True)
+            self.head = nn.Sequential(nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, len(CLASSES)))
 
         def forward(self, x):
-            h = self.conv(self.norm(x).unsqueeze(1)).transpose(1, 2)
-            _, (last, _) = self.lstm(h)
-            return self.head(last[-1])
+            h = self.embed(self.norm(x))
+            _, last = self.gru(h)
+            return self.head(torch.cat([last[-1], h[:, -1]], dim=1))
 
     return {'light': Light, 'full': Full}[kind]()
 
@@ -243,34 +270,63 @@ def build_model(kind, n_features, mean=None, std=None):
 def _load_model(path):
     import torch
     ckpt = torch.load(path, map_location='cpu', weights_only=False)
-    model = build_model(ckpt['kind'], ckpt['n_features'])
+    model = build_model(ckpt['kind'], ckpt['n_features'], context=ckpt.get('context', CONTEXT))
     model.load_state_dict(ckpt['state'])
     return model.eval()
 
 
-def _split(y, seed, fractions=(0.7, 0.15)):
-    """Stratified train/val/test index split."""
+def _split_blocks(y, block, seed, fractions=(0.7, 0.15)):
+    """Assign whole blocks to train/val/test, stratified by class; returns row masks."""
     import numpy as np
     rng = np.random.default_rng(seed)
-    parts = ([], [], [])
+    first = np.unique(block, return_index=True)[1]
+    part = np.zeros(int(block.max()) + 1, dtype=np.int64)
     for k in np.unique(y):
-        idx = rng.permutation(np.flatnonzero(y == k))
-        a = int(round(len(idx) * fractions[0]))
-        b = a + int(round(len(idx) * fractions[1]))
-        for part, sl in zip(parts, (idx[:a], idx[a:b], idx[b:])):
-            part.append(sl)
-    return [rng.permutation(np.concatenate(p)) for p in parts]
+        ids = rng.permutation(block[first][y[first] == k])
+        a = int(round(len(ids) * fractions[0]))
+        b = a + int(round(len(ids) * fractions[1]))
+        part[ids[a:b]], part[ids[b:]] = 1, 2
+    return [part[block] == p for p in range(3)]
 
 
-def _evaluate(model, X, y, device):
+class Windows:
+    """Builds model inputs for target rows: the row itself, or the row and the
+    ``context - 1`` rows before it in the same block. Context records can be
+    replaced by random records from ``pool`` with probability ``rho``."""
+
+    def __init__(self, X, block, context, pool):
+        import numpy as np
+        self.X, self.context, self.pool = X, context, pool
+        pos = np.zeros(len(block), dtype=np.int64)
+        starts = np.r_[0, np.flatnonzero(np.diff(block)) + 1]
+        lengths = np.diff(np.r_[starts, len(block)])
+        pos = np.arange(len(block)) - np.repeat(starts, lengths)
+        self.eligible = pos >= context - 1
+
+    def __call__(self, idx, rho=0.0, rng=None):
+        import numpy as np
+        if self.context == 1:
+            return self.X[idx]
+        S = self.X[idx[:, None] + np.arange(1 - self.context, 1)[None, :]]
+        if rho > 0:
+            mask = rng.random(S.shape[:2]) < rho
+            mask[:, -1] = False
+            S[mask] = self.X[rng.choice(self.pool, int(mask.sum()))]
+        return S
+
+
+def _evaluate(model, windows, idx, y, device, rho=0.0, seed=0):
     import numpy as np
     import torch
+    rng = np.random.default_rng(seed)
     preds = []
     with torch.inference_mode():
-        for i in range(0, len(X), 8192):
-            preds.append(model(torch.as_tensor(X[i:i + 8192], device=device)).argmax(1).cpu().numpy())
+        for i in range(0, len(idx), 4096):
+            x = torch.as_tensor(windows(idx[i:i + 4096], rho, rng), device=device)
+            preds.append(model(x).argmax(1).cpu().numpy())
     p = np.concatenate(preds)
-    out = {'class_recall': {}, 'recall': {}}
+    y = y[idx]
+    out = {'rho': rho, 'class_recall': {}, 'recall': {}}
     for k, c in enumerate(CLASSES):
         mask = y == k
         if mask.any():
@@ -284,43 +340,49 @@ def _evaluate(model, X, y, device):
     return out
 
 
-def train(data, kind, seed, epochs, out_dir):
+def train(data, kind, seed, epochs, out_dir, train_rho=0.5, eval_rho=0.5):
     import numpy as np
     import torch
     from torch import nn
     torch.manual_seed(seed)
-    np.random.seed(seed)
+    rng = np.random.default_rng(seed)
     d = np.load(data, allow_pickle=False)
-    X, y = d['X'], d['y']
-    tr, va, te = _split(y, seed)
-    Xt = np.nan_to_num(X[tr], nan=0.0, posinf=0.0, neginf=0.0)
+    X, y, block = d['X'], d['y'], d['block']
+    context = CONTEXT if kind == 'full' else 1
+    if context > 1 and not bool(d['ordered']):
+        raise SystemExit('The full model needs records in capture order (2024 folder layout).')
+    in_tr, in_va, in_te = _split_blocks(y, block, seed)
+    # Both models are trained and scored on the same targets: rows with a full context.
+    eligible = Windows(X, block, CONTEXT, None).eligible if bool(d['ordered']) else np.ones(len(y), bool)
+    tr, va, te = (np.flatnonzero(m & eligible) for m in (in_tr, in_va, in_te))
+    windows = Windows(X, block, context, np.flatnonzero(in_tr))
+    Xt = np.nan_to_num(X[in_tr], nan=0.0, posinf=0.0, neginf=0.0)
     logx = np.sign(Xt) * np.log1p(np.abs(Xt))
     mean, std = logx.mean(0), logx.std(0)
     std[std < 1e-6] = 1.0
     device = 'mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = build_model(kind, X.shape[1], mean.astype(np.float32), std.astype(np.float32)).to(device)
+    model = build_model(kind, X.shape[1], mean.astype(np.float32), std.astype(np.float32), context).to(device)
     counts = np.bincount(y[tr], minlength=len(CLASSES)).astype(np.float64)
     weights = np.where(counts > 0, counts.sum() / np.maximum(counts, 1) / len(CLASSES), 0.0)
     loss_fn = nn.CrossEntropyLoss(weight=torch.as_tensor(weights, dtype=torch.float32, device=device))
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
-    Xtr = torch.as_tensor(X[tr])
-    ytr = torch.as_tensor(y[tr])
-    gen = torch.Generator().manual_seed(seed)
+    ytr = torch.as_tensor(y)
     best, best_state, history = -1.0, None, []
     started = time.perf_counter()
     for epoch in range(epochs):
         model.train()
-        order = torch.randperm(len(tr), generator=gen)
+        order = rng.permutation(tr)
         total = 0.0
         for i in range(0, len(order), 1024):
             b = order[i:i + 1024]
+            x = windows(b, rng.uniform(0, train_rho), rng)  # context contamination as augmentation
             opt.zero_grad()
-            loss = loss_fn(model(Xtr[b].to(device)), ytr[b].to(device))
+            loss = loss_fn(model(torch.as_tensor(x, device=device)), ytr[b].to(device))
             loss.backward()
             opt.step()
             total += loss.item() * len(b)
         model.eval()
-        val = _evaluate(model, X[va], y[va], device)
+        val = _evaluate(model, windows, va, y, device, eval_rho if context > 1 else 0.0, seed)
         history.append({'epoch': epoch + 1, 'loss': total / len(tr), 'val_balanced_accuracy': val['balanced_accuracy']})
         print(f'{kind} epoch {epoch + 1}/{epochs}: loss {total / len(tr):.4f}, '
               f'val balanced accuracy {val["balanced_accuracy"]:.4f}')
@@ -328,16 +390,21 @@ def train(data, kind, seed, epochs, out_dir):
             best = val['balanced_accuracy']
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
     model.load_state_dict(best_state)
-    test = _evaluate(model.eval(), X[te], y[te], device)
+    model.eval()
+    test_clean = _evaluate(model, windows, te, y, device, 0.0, seed + 1)
+    test = _evaluate(model, windows, te, y, device, eval_rho, seed + 1) if context > 1 else test_clean
     out_dir.mkdir(parents=True, exist_ok=True)
-    torch.save({'kind': kind, 'n_features': int(X.shape[1]), 'state': best_state}, out_dir / f'{kind}.pt')
-    np.save(out_dir / 'timing_inputs.npy', X[te][:max(TIMING_FLOWS)])
+    torch.save({'kind': kind, 'n_features': int(X.shape[1]), 'context': context, 'state': best_state},
+               out_dir / f'{kind}.pt')
+    np.save(out_dir / 'timing_inputs.npy', Windows(X, block, CONTEXT, None)(te[:max(TIMING_FLOWS)]))
     params = sum(p.numel() for p in model.parameters())
-    result = {'model': kind, 'seed': seed, 'epochs': epochs, 'device': device, 'parameters': int(params),
+    result = {'model': kind, 'context': context, 'seed': seed, 'epochs': epochs, 'device': device,
+              'parameters': int(params), 'train_rho_max': train_rho if context > 1 else 0.0,
               'train_s': time.perf_counter() - started, 'split_sizes': [len(tr), len(va), len(te)],
-              'history': history, 'test': test}
+              'history': history, 'test': test, 'test_clean_context': test_clean}
     _write_json(out_dir / f'{kind}-metrics.json', result)
-    print(json.dumps({'recall': test['recall'], 'benign_fpr': test['benign_false_positive_rate']}, indent=2))
+    print(json.dumps({'recall': test['recall'], 'benign_fpr': test['benign_false_positive_rate'],
+                      'balanced_accuracy': test['balanced_accuracy']}, indent=2))
 
 
 # Step 3: timing (one fresh process per model) ----------------------------------
@@ -358,6 +425,8 @@ def probe(model_path, inputs_path, min_seconds, min_repeats):
     rss0 = _maxrss_mb()
     t0 = time.perf_counter()
     model = _load_model(model_path)
+    if model.context == 1:
+        X = X[:, -1].contiguous()  # one record per flow
     with torch.inference_mode():
         model(X[:1])
     load_s = time.perf_counter() - t0
@@ -426,6 +495,12 @@ def write_configs(work, sample_path, profile_name, ref_mips):
                        'mi_per_flow': round(t['per_flow_s'] * ref_mips, 6),
                        'memory_mb': max(1, math.ceil(t['memory_mb'])), 'load_s': round(t['load_s'], 4),
                        'recall': {c: round(m['test']['recall'].get(c, 0.0), 4) for c in ATTACKS},
+                       'context': m.get('context', 1), 'eval_rho': m['test'].get('rho', 0.0),
+                       'recall_clean_context': {c: round(m['test_clean_context']['recall'].get(c, 0.0), 4)
+                                                for c in ATTACKS} if 'test_clean_context' in m else None,
+                       'balanced_accuracy_clean_context': m.get('test_clean_context', m['test'])['balanced_accuracy'],
+                       'benign_false_positive_rate_clean_context':
+                           m.get('test_clean_context', m['test'])['benign_false_positive_rate'],
                        'fit': {'fixed_s': t['fixed_s'], 'per_flow_s': t['per_flow_s'], 'r2': t['r2']},
                        'benign_false_positive_rate': m['test']['benign_false_positive_rate'],
                        'balanced_accuracy': m['test']['balanced_accuracy'], 'parameters': m['parameters']})
@@ -450,18 +525,27 @@ def _update_report(profile, timing):
              f"PyTorch {hw.get('torch', '?')}, one CPU thread, reference {profile['ref_mips']} MIPS.",
              f"Sample: {profile['dataset']['rows']} rows from {profile['dataset']['files']} CSV files, "
              f"at most {profile['dataset']['cap_per_label']} per original label.", '',
-             '| Model | Params | fixed, µs | per flow, µs | R² | fixed_mi | mi_per_flow | load_s | memory_mb | '
-             'balanced acc. | benign FPR |',
-             '|---|---|---|---|---|---|---|---|---|---|---|']
+             '| Model | Records | Params | fixed, µs | per flow, µs | R² | fixed_mi | mi_per_flow | load_s | '
+             'memory_mb |',
+             '|---|---|---|---|---|---|---|---|---|---|']
     for m in profile['models']:
-        lines.append(f"| {m['name']} | {m['parameters']} | {m['fit']['fixed_s'] * 1e6:.1f} | "
+        lines.append(f"| {m['name']} | {m.get('context', 1)} | {m['parameters']} | {m['fit']['fixed_s'] * 1e6:.1f} | "
                      f"{m['fit']['per_flow_s'] * 1e6:.3f} | {m['fit']['r2']:.4f} | {m['fixed_mi']} | "
-                     f"{m['mi_per_flow']} | {m['load_s']} | {m['memory_mb']} | {m['balanced_accuracy']:.4f} | "
-                     f"{m['benign_false_positive_rate']:.4f} |")
-    lines += ['', 'Detection recall per class (test split):', '',
-              '| Model | ' + ' | '.join(ATTACKS) + ' |', '|---|' + '---|' * len(ATTACKS)]
+                     f"{m['mi_per_flow']} | {m['load_s']} | {m['memory_mb']} |")
+    rows = []
     for m in profile['models']:
-        lines.append(f"| {m['name']} | " + ' | '.join(f"{m['recall'][c]:.4f}" for c in ATTACKS) + ' |')
+        if m.get('recall_clean_context') and m.get('context', 1) > 1:
+            rows.append((f"{m['name']}, clean context", m['recall_clean_context'],
+                         m['balanced_accuracy_clean_context'], m['benign_false_positive_rate_clean_context']))
+            rows.append((f"{m['name']}, {m['eval_rho']:.0%} of context replaced (used)", m['recall'],
+                         m['balanced_accuracy'], m['benign_false_positive_rate']))
+        else:
+            rows.append((m['name'], m['recall'], m['balanced_accuracy'], m['benign_false_positive_rate']))
+    lines += ['', 'Test blocks: detection recall per class, balanced 8-class accuracy, benign false-positive rate:', '',
+              '| Model | ' + ' | '.join(ATTACKS) + ' | balanced acc. | benign FPR |',
+              '|---|' + '---|' * (len(ATTACKS) + 2)]
+    for name, rec, bal, fpr in rows:
+        lines.append(f"| {name} | " + ' | '.join(f"{rec[c]:.4f}" for c in ATTACKS) + f" | {bal:.4f} | {fpr:.4f} |")
     lines += ['', 'Rows per class in the sample: ' +
               ', '.join(f'{c} {n}' for c, n in profile['dataset']['kept_per_class'].items()) + '.']
     text = REPORT.read_text(encoding='utf-8')
@@ -476,16 +560,23 @@ def main(argv=None):
     if argv is None and len(sys.argv) > 1 and sys.argv[1] == '_probe':
         _, _, model, inputs, min_s, min_r = sys.argv
         return probe(model, inputs, float(min_s), int(min_r))
+    sys.stdout.reconfigure(line_buffering=True)  # progress stays visible when piped to tee
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('step', choices=('prepare', 'train', 'time', 'configs', 'all'))
     p.add_argument('--raw', type=Path, default=DATA / 'CICIoT2023', help='Directory with CICIoT2023 CSV files')
-    p.add_argument('--sample', type=Path, default=DATA / 'ciciot2023' / 'sample.npz')
+    # Kept outside the raw-data folder; on case-insensitive file systems data/ciciot2023
+    # and data/CICIoT2023 would be the same directory.
+    p.add_argument('--sample', type=Path, default=DATA / 'ciciot2023-sample.npz')
     p.add_argument('--cap', type=int, default=20000, help='Maximum rows kept per original label')
     p.add_argument('--drop', nargs='*', default=[], help='Feature columns to exclude, e.g. Time_To_Live IAT')
     p.add_argument('--seed', type=int, default=2023)
     p.add_argument('--model', choices=('light', 'full', 'both'), default='both')
     p.add_argument('--epochs-light', type=int, default=15)
     p.add_argument('--epochs-full', type=int, default=10)
+    p.add_argument('--train-rho', type=float, default=0.5,
+                   help='Maximum share of context records replaced by random records during training')
+    p.add_argument('--eval-rho', type=float, default=0.5,
+                   help='Share of context records replaced when scoring the full model')
     p.add_argument('--min-seconds', type=float, default=0.3, help='Minimum timing duration per window size')
     p.add_argument('--min-repeats', type=int, default=50)
     p.add_argument('--profile', default='mac', help='Hardware profile name')
@@ -499,7 +590,8 @@ def main(argv=None):
             prepare(a.raw, a.sample, a.cap, a.seed, tuple(a.drop))
         elif step == 'train':
             for kind in (('light', 'full') if a.model == 'both' else (a.model,)):
-                train(a.sample, kind, a.seed, a.epochs_light if kind == 'light' else a.epochs_full, WORK)
+                train(a.sample, kind, a.seed, a.epochs_light if kind == 'light' else a.epochs_full, WORK,
+                      a.train_rho, a.eval_rho)
         elif step == 'time':
             measure(WORK, a.min_seconds, a.min_repeats)
         else:
