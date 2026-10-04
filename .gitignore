@@ -8,3 +8,4 @@ build/
 tmp/
 artifacts/*
 !artifacts/.gitkeep
+data/

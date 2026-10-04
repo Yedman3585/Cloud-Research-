@@ -1,0 +1,81 @@
+{
+  "profile": "mac",
+  "ref_mips": 8000,
+  "hardware": {
+    "platform": "macOS-13.0-arm64-arm-64bit",
+    "machine": "arm64",
+    "python": "3.12.14",
+    "torch": "2.11.0",
+    "machdep.cpu.brand_string": "Apple M2",
+    "hw.model": "Mac14,2",
+    "hw.memsize": "8589934592"
+  },
+  "threads": 1,
+  "dataset": {
+    "files": 309,
+    "cap_per_label": 20000,
+    "seed": 2023,
+    "features": 39,
+    "rows": 560155,
+    "kept_per_class": {
+      "benign": 20000,
+      "ddos": 240000,
+      "dos": 80000,
+      "mirai": 60000,
+      "recon": 82262,
+      "spoofing": 40000,
+      "web": 24829,
+      "bruteforce": 13064
+    }
+  },
+  "models": [
+    {
+      "name": "light",
+      "fixed_mi": 0.20471,
+      "mi_per_flow": 0.001197,
+      "memory_mb": 3,
+      "load_s": 0.0069,
+      "recall": {
+        "ddos": 0.9999,
+        "dos": 0.9999,
+        "mirai": 1.0,
+        "recon": 0.8528,
+        "spoofing": 0.867,
+        "web": 0.894,
+        "bruteforce": 0.8361
+      },
+      "fit": {
+        "fixed_s": 2.558871336290825e-05,
+        "per_flow_s": 1.496000324545505e-07,
+        "r2": 0.9930529555390901
+      },
+      "benign_false_positive_rate": 0.2823333333333333,
+      "balanced_accuracy": 0.7276213937643912,
+      "parameters": 4904
+    },
+    {
+      "name": "full",
+      "fixed_mi": 0.0,
+      "mi_per_flow": 1.015412,
+      "memory_mb": 114,
+      "load_s": 0.004,
+      "recall": {
+        "ddos": 0.9999,
+        "dos": 1.0,
+        "mirai": 1.0,
+        "recon": 0.857,
+        "spoofing": 0.87,
+        "web": 0.9007,
+        "bruteforce": 0.8428
+      },
+      "fit": {
+        "fixed_s": 0.0,
+        "per_flow_s": 0.00012692655287558236,
+        "r2": 0.9974565341360362
+      },
+      "benign_false_positive_rate": 0.2876666666666667,
+      "balanced_accuracy": 0.727009192735736,
+      "parameters": 44296
+    }
+  ]
+}
