@@ -105,7 +105,8 @@ def generate(c):
     nodes = build_topology(c, stream)
     gateways = [n for n in nodes if n.tier == 'edge']
     models = [Model(name=m['name'], fixed_mi=m['fixed_mi'], mi_per_flow=m['mi_per_flow'],
-                    memory_mb=m['memory_mb'], load_s=m['load_s'], recall=dict(m['recall']))
+                    memory_mb=m['memory_mb'], load_s=m['load_s'], recall=dict(m['recall']),
+                    false_positive_rate=m.get('false_positive_rate', 0.0))
               for m in c['models']]
     traffic, risk, deadlines = c['traffic'], c['risk'], c['deadlines']
     bursts = [{**b, 'targets': set(_pick(stream, len(gateways), b['gateways']))} for b in c['attacks']]

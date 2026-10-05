@@ -113,8 +113,9 @@ def fit_linear(xs, ys):
 
 
 def calibrated_config(base, profile, n_features, scale=1.0):
-    """Copy a generator config and apply a profile: model costs and recalls, node speeds,
-    class-relative burst intensities; ``scale`` multiplies every traffic rate."""
+    """Copy a generator config and apply a profile: model costs, recalls and benign
+    false-positive rates, node speeds, class-relative burst intensities; ``scale``
+    multiplies every traffic rate."""
     out = json.loads(json.dumps(base))
     suffix = '' if scale == 1 else f'-x{scale:g}'
     out['name'] = base['name'] + '-calibrated' + suffix
@@ -127,7 +128,9 @@ def calibrated_config(base, profile, n_features, scale=1.0):
     for m in out['models']:
         p = by_name[m['name']]
         m.update(fixed_mi=p['fixed_mi'], mi_per_flow=p['mi_per_flow'], memory_mb=p['memory_mb'],
-                 load_s=p['load_s'], recall={c: p['recall'][c] for c in ATTACKS})
+                 load_s=p['load_s'], recall={c: p['recall'][c] for c in ATTACKS},
+                 false_positive_rate=round(p.get('benign_false_positive_rate',
+                                                 m.get('false_positive_rate', 0.0)), 4))
     out['traffic']['bytes_per_flow'] = 4 * n_features  # one float32 feature vector per flow
     for tier, spec in profile.get('tiers', {}).items():
         out['topology'][tier]['mips'] = spec['mips']

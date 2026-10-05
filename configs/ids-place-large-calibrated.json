@@ -61,7 +61,8 @@
         "spoofing": 0.8503,
         "web": 0.8708,
         "bruteforce": 0.8565
-      }
+      },
+      "false_positive_rate": 0.2559
     },
     {
       "name": "full",
@@ -77,7 +78,8 @@
         "spoofing": 0.8627,
         "web": 0.9169,
         "bruteforce": 0.9087
-      }
+      },
+      "false_positive_rate": 0.1268
     }
   ],
   "traffic": {

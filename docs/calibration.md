@@ -5,8 +5,9 @@ them with values measured on real data and real hardware. Code:
 [`scripts/calibrate.py`](../scripts/calibrate.py). Output: a hardware profile
 `configs/calibration-<profile>.json` and generator configs
 `configs/ids-place-{small,medium,large}-calibrated.json` (`"calibrated": true`).
-Only model parameters (`fixed_mi`, `mi_per_flow`, `memory_mb`, `load_s`, `recall`) and
-`traffic.bytes_per_flow` change; topology, traffic and deadlines stay as in the base configs.
+Model parameters (`fixed_mi`, `mi_per_flow`, `memory_mb`, `load_s`, `recall`,
+`false_positive_rate`), node speeds, burst intensities, `traffic.bytes_per_flow` and the load
+scale change; topology layout, deadlines and burst timing stay as in the base configs.
 
 ## Data
 
@@ -193,8 +194,11 @@ Rows per class in the sample: benign 20000, ddos 240000, dos 80000, mirai 60000,
    M2 core), but is cheap in absolute terms. At the base traffic volume a gateway could
    run `full` on all its tasks with a peak one-second utilization well below 1; placement
    becomes a real trade-off only at higher volumes (see the offered-load table above).
-3. **Benign false positives are not yet a simulator metric**, so the main advantage of
-   `full` is invisible to schedulers and to the reported results until they are.
+3. **Benign false positives are now part of the problem.** The benign false-positive rate
+   of each model is written to the configs as `false_positive_rate` (the pessimistic,
+   half-replaced-context value for `full`) and the simulator reports the false-alert rate.
+   Before this, missed detection alone made `light` look as good as `full`. Results with
+   both error kinds: [ids-place.md, section 7](ids-place.md#7-results-with-calibrated-models).
 
 ## Reproduce
 
@@ -216,4 +220,6 @@ The sample goes to `data/ciciot2023-sample.npz`, intermediate files to `artifact
   is not measured here (`traffic.feature_s_per_flow` is unchanged).
 - Timings come from a general-purpose CPU, not from an edge device; the edge/fog/cloud
   speed ratios remain configuration parameters.
-- Rows of CICIoT2023 are split at random, not by capture; recall may be optimistic.
+- Train, validation and test sets are split by blocks of 200 consecutive rows, not by
+  capture file; blocks of one capture can fall on both sides, so recall may still be
+  somewhat optimistic.

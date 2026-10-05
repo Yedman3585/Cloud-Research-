@@ -37,12 +37,16 @@ def run_cli(args, root):
             writer.writerows(rows)
         summaries.append(summarize(instance, end))
     (output / 'summary.json').write_text(json.dumps(summaries, indent=2) + '\n', encoding='utf-8')
-    header = f"{'policy':<16}{'miss all':>10}{'miss short':>12}{'p95 s':>9}{'unfinished':>12}{'missed attack':>15}{'cloud cost':>12}"
+    header = (f"{'policy':<16}{'miss all':>10}{'miss short':>12}{'p95 s':>9}{'unfinished':>12}"
+              f"{'missed atk':>12}{'macro':>8}{'false al.':>11}{'cloud cost':>12}")
     print(header)
     for s in summaries:
         p95 = s['all']['latency_p95_s']
         print(f"{s['policy']:<16}{s['all']['deadline_miss_rate']:>10.3f}{s['short_deadline']['deadline_miss_rate']:>12.3f}"
               f"{(p95 if p95 is not None else float('nan')):>9.3f}{s['all']['unfinished']:>12}"
-              f"{s['missed_attack_flow_fraction']:>15.4f}{s['cloud_cost']:>12.3f}")
+              f"{s['missed_attack_flow_fraction']:>12.4f}{s['missed_attack_macro']:>8.4f}"
+              f"{s['false_alert_rate']:>11.4f}{s['cloud_cost']:>12.3f}")
+    print('missed atk: undetected attack flows; macro: mean over attack classes; '
+          'false al.: benign flows flagged')
     print(f'Results: {output}')
     return 0

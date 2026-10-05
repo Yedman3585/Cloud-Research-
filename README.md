@@ -40,8 +40,10 @@ The tiny exact-oracle demo accepts 1–8 tasks and the fixed edge → fog → cl
 The research problem, **IDS-PLACE** (risk-aware online placement of DL-based IDS
 inference under attack bursts), is specified in [docs/ids-place.md](docs/ids-place.md).
 A seeded generator builds instances: an edge-fog-cloud tree, IDS model variants and a
-stream of feature-window tasks with synthetic attack bursts. Model costs are
-uncalibrated placeholders for now.
+stream of feature-window tasks with synthetic attack bursts. The base configs use
+placeholder model parameters; `configs/ids-place-*-calibrated*.json` use model costs,
+recalls and false-positive rates measured on CICIoT2023 at load scales x1, x3 and x10
+(see [docs/calibration.md](docs/calibration.md)).
 
 ```bash
 fogids generate --config configs/ids-place-small.json   # artifacts/instances/*.json
@@ -61,8 +63,9 @@ fogids simulate --config configs/ids-place-medium.json --policy greedy-finish --
 ```
 
 Each run writes the instance, per-task CSV files, simulator logs, and `summary.json`
-with deadline-miss rates per risk class, latency percentiles, missed attack flows,
-energy, cloud cost and decision time.
+with deadline-miss rates per risk class, latency percentiles, missed detection
+(per class and macro-averaged), the false-alert rate on benign flows, energy, cloud
+cost and decision time.
 
 Run the tests:
 
@@ -70,12 +73,14 @@ Run the tests:
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-The 34 tests cover QUBO expansion, feasible-assignment costs, bounded slack,
+The 42 tests cover QUBO expansion, feasible-assignment costs, bounded slack,
 seeded SA, configuration validation, Java integration, the IDS-PLACE problem model
 (eligibility, transfer and compute times, validation), and the instance generator
 (determinism, a cross-platform fingerprint, burst and chunking behaviour), and the
 online bridge against analytic timings (epoch boundaries, transfer plus compute,
-cold starts, CPU sharing, decision delay, snapshot state, invalid assignments). Simulation checks
+cold starts, CPU sharing, decision delay, snapshot state, invalid assignments), the
+detection metrics (false alerts, per-class and macro missed detection), and the
+calibration helpers (one of them needs NumPy and is skipped without it). Simulation checks
 include local compute time, cloud network transfer, shared CPU execution,
 decision delay, and unfinished tasks.
 

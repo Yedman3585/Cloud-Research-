@@ -66,6 +66,10 @@ class ProblemTests(unittest.TestCase):
             instance(tasks=[task(0, 'fog0', 1.0)]).validate()
         with self.assertRaises(ValueError):  # releases out of order
             instance(tasks=[task(0, 'gw0', 2.0), task(1, 'gw0', 1.0)]).validate()
+        bad_fpr = instance(tasks=[])
+        bad_fpr.models[0] = Model('light', 10, 1, 100, 0.5, recall={'ddos': 0.9}, false_positive_rate=1.5)
+        with self.assertRaises(ValueError):  # false-positive rate outside [0, 1]
+            bad_fpr.validate()
         with self.assertRaises(ValueError):  # attack class without recall
             instance(tasks=[Task(**{**task(0, 'gw0', 1.0, attack=5).__dict__, 'label': 'web'})]).validate()
         heavy = [node('cloud', 'cloud', None, resident=('light', 'full'))]

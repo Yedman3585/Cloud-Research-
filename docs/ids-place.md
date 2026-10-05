@@ -7,8 +7,8 @@ methods are compared on a frozen benchmark rather than the problem being tuned t
 method. Code: [`problem.py`](../src/fogids/problem.py) (model and instance format) and
 [`generator.py`](../src/fogids/generator.py) (seeded instances).
 
-Status: **v1 draft (milestones M1 and M2).** Model costs and recalls in the shipped configurations
-are uncalibrated placeholders until milestone M4 (measurement on CICIoT2023).
+Status: **v1 draft (milestones M1, M2 and M4).** The base configs carry placeholder model
+parameters; the `*-calibrated*` configs carry values measured on CICIoT2023.
 
 ## 1. System
 
@@ -20,7 +20,8 @@ are uncalibrated placeholders until milestone M4 (measurement on CICIoT2023).
   Alerts are delivered to the cloud and are outside the latency measured in v1.
 - **Models.** A set K of IDS model variants (v1: `light`, `full`). Variant k costs
   `fixed_mi_k + mi_per_flow_k * flows` MI, needs `memory_k` MB, takes `load_k` s to cold-start
-  on a node where it is not resident, and detects attack class c with recall `recall_k[c]`.
+  on a node where it is not resident, detects attack class c with recall `recall_k[c]`, and
+  flags benign flows as attacks with false-positive rate `fpr_k`.
 
 ## 2. Tasks
 
@@ -63,11 +64,20 @@ The scheduler minimizes, per epoch, a weighted sum of
    time including uplink queueing and CPU sharing;
 2. expected missed detection `Σ w_i (1 - recall_k[class_i])` (estimated from the pre-filter
    score, since the true class is hidden);
-3. energy of edge and fog nodes, and cloud cost.
+3. expected false alerts `Σ benign_i · fpr_k`, with benign flows estimated as
+   `n_flows · (1 - prefilter_score)` (`Task.estimated_benign_flows`);
+4. energy of edge and fog nodes, and cloud cost.
 
 Evaluation reports (per risk class): p50/p95/p99 time-to-detect, deadline-miss rate,
-weighted missed detection (using ground truth), energy, cloud cost, and scheduler
-decision time. Decision time is charged to the simulation clock.
+missed detection (fraction of attack flows, per class, and the macro average over the
+attack classes present), false-alert rate (fraction of benign flows flagged), energy,
+cloud cost, and scheduler decision time. Ground truth is used only for evaluation. An
+unfinished task detects nothing and raises no alerts. Decision time is charged to the
+simulation clock.
+
+Both error kinds matter: with the calibrated models, recall on flood attacks is 1.0 for
+both variants, so missed detection alone barely separates them, while `full` halves the
+false alerts of `light` (section 7).
 
 ## 5. Instance Generator
 
@@ -141,12 +151,50 @@ First results with uncalibrated placeholder costs (seed as in the shipped config
 Short-deadline tasks are mostly missed under every baseline: during bursts, a 0.3 s
 deadline is shorter than the edge uplink transfer of large windows. Whether this is a
 property of the problem or of the placeholder parameters is decided by calibration (M4).
+With calibrated parameters (section 7), short deadlines can be met by running `light` at the
+gateway; they become hard only when the more accurate `full` model is wanted.
 
-## 7. Open Points for v1 Freeze
+## 7. Results with Calibrated Models
+
+Calibrated configs (`configs/ids-place-*-calibrated[-x3|-x10].json`, see
+[calibration.md](calibration.md)) use model costs, recalls and false-positive rates measured
+on CICIoT2023 and scale all traffic by x1, x3 or x10. Medium instance, seed 12, decision
+time not charged:
+
+| Load | Policy | Miss rate (all / short) | p95, s | Unfinished | Missed attack (macro) | False alerts |
+|---|---|---|---|---|---|---|
+| x1 | edge-light | 0.000 / 0.000 | 0.10 | 0 | 0.069 | 0.256 |
+| x1 | edge-full | 0.007 / 0.016 | 0.27 | 0 | 0.060 | 0.127 |
+| x1 | greedy-finish | 0.052 / 0.126 | 0.31 | 0 | 0.060 | 0.127 |
+| x3 | edge-light | 0.000 / 0.000 | 0.10 | 0 | 0.069 | 0.256 |
+| x3 | edge-full | 0.532 / 0.906 | 0.67 | 0 | 0.060 | 0.127 |
+| x3 | fog-full | 0.598 / 0.957 | 9.76 | 0 | 0.060 | 0.127 |
+| x3 | greedy-finish | 0.381 / 0.649 | 2.26 | 0 | 0.060 | 0.127 |
+| x10 | edge-light | 0.000 / 0.000 | 0.11 | 0 | 0.069 | 0.256 |
+| x10 | edge-full | 0.666 / 0.991 | 14.80 | 0 | 0.060 | 0.127 |
+| x10 | fog-full | 0.725 / 0.992 | 52.82 | 2219 | 0.321 | 0.097 |
+| x10 | greedy-finish | 0.181 / 0.283 | 2.84 | 0 | 0.060 | 0.136 |
+
+Reading:
+
+- **The trade-off is between timeliness and alert quality.** `light` meets every deadline
+  at every load but flags a quarter of benign flows; `full` halves false alerts and lowers
+  missed detection on the hard classes (recon, spoofing, web, brute force), but no single
+  tier can run it on all windows once traffic grows: at x3 the gateways are saturated
+  (edge-full misses 53 % of deadlines) and offloading is limited by the uplinks.
+- **x1 is nearly trivial** (edge-full almost meets every deadline); **x3 and x10 are the
+  main regimes** for the benchmark. Results should be reported as a function of load.
+- **The greedy baseline is weak**: its latency estimate ignores uplink queues, so it sends
+  work to saturated links (and is better at x10 than at x3 on this seed). Queue-aware
+  baselines are part of M3.
+- The false-alert rate of an unfinished task is zero by definition, so an overloaded policy
+  can look better on that column (fog-full at x10); read it together with unfinished tasks.
+
+## 8. Open Points for v1 Freeze
 
 - Whether a scheduler may re-plan tasks that were placed but have not started (this
   enlarges the per-epoch decision and is relevant for QUBO size).
 - Model eviction policy when memory is full.
-- Calibrated costs and recalls (M4); trace-driven arrivals from CICIoT2023 in addition to
-  the synthetic bursts.
-- Short-deadline feasibility under bursts (see section 6) after calibration.
+- Trace-driven arrivals from CICIoT2023 in addition to the synthetic bursts.
+- A single scalar score for comparing policies (weights of latency, missed detection and
+  false alerts), or reporting Pareto fronts instead.

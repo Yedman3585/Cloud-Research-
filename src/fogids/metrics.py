@@ -4,6 +4,13 @@ Ground-truth labels are used here and only here. Latency is measured from task
 release to inference completion. Unfinished tasks count as deadline misses and
 are excluded from the latency percentiles, which therefore always come with the
 count of unfinished tasks.
+
+Detection quality has two sides. Missed detection: attack flows not flagged,
+expected value ``attack_flows * (1 - recall[model][class])``, all of them if the task
+never finishes. False alerts: benign flows flagged as attacks, expected value
+``benign_flows * false_positive_rate[model]``, none if the task never finishes.
+Missed detection is reported per class and as a macro average over the attack
+classes present, so that rare, hard classes are not drowned by flood traffic.
 """
 import math
 
@@ -24,7 +31,9 @@ def task_rows(instance, end):
         t = instance.tasks[r['id']]
         finish = r['finish_s']
         latency = None if finish is None else finish - t.release_s
-        recall = instance.model(r['model']).recall.get(t.label, 0.0) if r['model'] and t.attack_flows else 0.0
+        model = instance.model(r['model'])
+        recall = model.recall.get(t.label, 0.0) if t.attack_flows else 0.0
+        benign = t.n_flows - t.attack_flows
         rows.append({
             'id': t.id, 'gateway': t.gateway, 'node': r['node'], 'model': r['model'],
             'release_s': t.release_s, 'dispatch_s': r['dispatch_s'], 'finish_s': finish,
@@ -34,6 +43,8 @@ def task_rows(instance, end):
             'attack_flows': t.attack_flows, 'cold_start': r['cold_start'],
             # Expected undetected attack flows; an unfinished task detects nothing in time.
             'missed_attack_flows': t.attack_flows * (1 - (recall if latency is not None else 0.0)),
+            'benign_flows': benign,
+            'false_alert_flows': benign * model.false_positive_rate if latency is not None else 0.0,
         })
     shortest = min((t.deadline_s for t in instance.tasks), default=0)
     for row in rows:
@@ -69,10 +80,23 @@ def energy_j(instance, rows, duration_s, exclude=()):
                for n in instance.nodes if n.name not in exclude)
 
 
+def missed_by_class(rows):
+    """Fraction of each attack class's flows that went undetected."""
+    totals, missed = {}, {}
+    for r in rows:
+        if r['attack_flows']:
+            totals[r['label']] = totals.get(r['label'], 0) + r['attack_flows']
+            missed[r['label']] = missed.get(r['label'], 0.0) + r['missed_attack_flows']
+    return {c: missed[c] / totals[c] for c in sorted(totals)}
+
+
 def summarize(instance, end):
     rows = task_rows(instance, end)
     attack = sum(r['attack_flows'] for r in rows)
     missed_flows = sum(r['missed_attack_flows'] for r in rows)
+    benign = sum(r['benign_flows'] for r in rows)
+    false_alerts = sum(r['false_alert_flows'] for r in rows)
+    by_class = missed_by_class(rows)
     weights = {t.id: t.criticality for t in instance.tasks}
     cloud = {n.name for n in instance.tier('cloud')}
     cloud_mi = sum(instance.model(r['model']).work_mi(instance.tasks[r['id']].n_flows)
@@ -90,6 +114,10 @@ def summarize(instance, end):
         'short_deadline': _group([r for r in rows if r['short_deadline']]),
         'long_deadline': _group([r for r in rows if not r['short_deadline']]),
         'missed_attack_flow_fraction': missed_flows / attack if attack else 0.0,
+        'missed_attack_macro': sum(by_class.values()) / len(by_class) if by_class else 0.0,
+        'missed_attack_by_class': by_class,
+        'false_alert_flows': false_alerts,
+        'false_alert_rate': false_alerts / benign if benign else 0.0,
         'weighted_missed_attack_flows': sum(r['missed_attack_flows'] * weights[r['id']] for r in rows),
         'cold_starts': sum(r['cold_start'] for r in rows),
         'placement': dict(sorted(placement.items())),

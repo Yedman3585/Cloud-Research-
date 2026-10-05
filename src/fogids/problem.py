@@ -46,6 +46,7 @@ class Model:
     memory_mb: int
     load_s: float  # cold-start time when the model is not resident on a node
     recall: dict = field(default_factory=dict)  # attack class -> recall in [0, 1]
+    false_positive_rate: float = 0.0  # fraction of benign flows flagged as attacks
 
     def work_mi(self, n_flows):
         return self.fixed_mi + self.mi_per_flow * n_flows
@@ -64,6 +65,11 @@ class Task:
     input_bytes: int
     prefilter_score: float  # noisy attack score visible to schedulers, [0, 1]
     criticality: float
+
+    @property
+    def estimated_benign_flows(self):
+        """Scheduler-side estimate of benign flows, from the pre-filter score."""
+        return self.n_flows * (1.0 - self.prefilter_score)
 
     @property
     def weight(self):
@@ -167,6 +173,8 @@ class Instance:
                 raise ValueError(f'Model {m.name}: invalid cost parameters')
             if not all(0 <= r <= 1 for r in m.recall.values()):
                 raise ValueError(f'Model {m.name}: recall must lie in [0, 1]')
+            if not 0 <= m.false_positive_rate <= 1:
+                raise ValueError(f'Model {m.name}: false-positive rate must lie in [0, 1]')
         previous = None
         for t in self.tasks:
             if t.gateway not in self._nodes or self._nodes[t.gateway].tier != 'edge':

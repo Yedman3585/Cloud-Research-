@@ -17,8 +17,9 @@ class Policy:
 
 
 def _models_by_quality(instance):
-    """Models ordered from highest to lowest mean recall."""
-    return sorted(instance.models, key=lambda m: -sum(m.recall.values()) / max(1, len(m.recall)))
+    """Models ordered from best to worst detection quality: mean recall minus false-positive rate."""
+    return sorted(instance.models,
+                  key=lambda m: -(sum(m.recall.values()) / max(1, len(m.recall)) - m.false_positive_rate))
 
 
 class Fixed(Policy):

@@ -37,7 +37,9 @@ class CalibrationTests(unittest.TestCase):
         recall = {c: 0.9 for c in calibrate.ATTACKS}
         profile = {'profile': 'test', 'ref_mips': 8000,
                    'models': [{'name': n, 'fixed_mi': 0.5, 'mi_per_flow': 0.01, 'memory_mb': 20,
-                               'load_s': 0.05, 'recall': recall} for n in ('light', 'full')]}
+                               'load_s': 0.05, 'recall': recall,
+                               'benign_false_positive_rate': fpr}
+                              for n, fpr in (('light', 0.3), ('full', 0.123456))]}
         config = calibrate.calibrated_config(base, profile, n_features=46)
         self.assertTrue(config['calibrated'])
         self.assertEqual(config['traffic']['bytes_per_flow'], 184)
@@ -45,6 +47,7 @@ class CalibrationTests(unittest.TestCase):
         instance = generate(config)
         self.assertTrue(instance.meta['calibrated'])
         self.assertEqual(instance.model('full').mi_per_flow, 0.01)
+        self.assertEqual(instance.model('full').false_positive_rate, 0.1235)
 
     def test_profile_sets_node_speeds_and_scaled_class_intensities(self):
         base = json.loads((ROOT / 'configs/ids-place-small.json').read_text(encoding='utf-8'))

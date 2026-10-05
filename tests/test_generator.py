@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SMALL = ROOT / 'configs/ids-place-small.json'
 # Fingerprint of configs/ids-place-small.json. A mismatch on another machine means
 # the generator is not platform-reproducible; update only after a deliberate change.
-SMALL_SHA256 = '7e3568e77fa2897ee397857d2b5b646fef740c74251d1986b5e273e29da54a2e'
+SMALL_SHA256 = '259253671ebb5bc20a9ffa02a3a10931008aa196adb79587eee5ec1e9b1a3543'
 
 
 class GeneratorTests(unittest.TestCase):
