@@ -7,7 +7,7 @@ methods are compared on a frozen benchmark rather than the problem being tuned t
 method. Code: [`problem.py`](../src/fogids/problem.py) (model and instance format) and
 [`generator.py`](../src/fogids/generator.py) (seeded instances).
 
-Status: **v1 draft (milestones M1, M2 and M4).** The base configs carry placeholder model
+Status: **v1 draft (milestones M1–M4).** The base configs carry placeholder model
 parameters; the `*-calibrated*` configs carry values measured on CICIoT2023.
 
 ## 1. System
@@ -190,7 +190,81 @@ Reading:
 - The false-alert rate of an unfinished task is zero by definition, so an overloaded policy
   can look better on that column (fog-full at x10); read it together with unfinished tasks.
 
-## 8. Open Points for v1 Freeze
+## 8. Baselines and Multi-Seed Results (milestone M3)
+
+Reference policies ([`policies.py`](../src/fogids/policies.py)); all see only
+scheduler-visible information:
+
+| Policy | Rule |
+|---|---|
+| `edge-light`, `edge-full`, `fog-full`, `cloud-full` | Every window to one tier with one model |
+| `greedy-finish` | Highest risk weight first; best model whose queue-free latency estimate (CPU backlog only) meets the deadline |
+| `edge-adaptive` | Never offloads; best model at the gateway predicted to meet the deadline, else the fastest |
+| `queue-greedy` | Like `greedy-finish` over all eligible nodes, with a queue-aware estimate |
+| `risk-split` | Short-deadline windows: fastest model at the gateway; others: best model on the node predicted to finish first (queue-aware) |
+| `random` | Uniform eligible node and model, seeded |
+
+The queue-aware estimate (`QueueModel`) treats each uplink as a FIFO queue (serialization
+then propagation, as in the simulator) and each CPU as a fluid backlog that drains at the
+node's MIPS; it predicts cold starts from tracked residency. It is built only from the
+policy's own decisions.
+
+`fogids sweep` runs every (config, seed, policy) combination in parallel and aggregates
+across seeds (mean and 95 % Student-t interval); it writes `runs.csv`, `summary.csv`,
+`summary.md` and figures (`pip install -e '.[analysis]'` for matplotlib).
+
+```bash
+fogids sweep --name m3-medium --seeds 5 \
+  --config configs/ids-place-medium-calibrated.json \
+  --config configs/ids-place-medium-calibrated-x3.json \
+  --config configs/ids-place-medium-calibrated-x10.json \
+  --policy edge-light --policy edge-full --policy fog-full --policy cloud-full \
+  --policy greedy-finish --policy edge-adaptive --policy queue-greedy --policy risk-split --policy random
+```
+
+Medium instance, calibrated models, 5 seeds (1–5), decision time not charged. Mean ±
+95 % interval; intervals of 0.000 mean the value did not vary across seeds.
+
+| Load | Policy | Miss rate (all) | Miss rate (short) | False alerts | Missed attack (macro) |
+|---|---|---|---|---|---|
+| x3 | edge-light | 0.000 ± 0.000 | 0.000 ± 0.000 | 0.256 | 0.069 |
+| x3 | edge-full | 0.536 ± 0.008 | 0.909 ± 0.010 | 0.127 | 0.060 |
+| x3 | greedy-finish | 0.409 ± 0.018 | 0.693 ± 0.031 | 0.127 | 0.060 |
+| x3 | edge-adaptive | 0.056 ± 0.013 | 0.095 ± 0.022 | 0.134 | 0.060 |
+| x3 | queue-greedy | 0.053 ± 0.012 | 0.090 ± 0.021 | 0.133 | 0.060 |
+| x3 | risk-split | 0.000 ± 0.000 | 0.000 ± 0.000 | 0.145 | 0.059 |
+| x3 | random | 0.371 ± 0.008 | 0.622 ± 0.016 | 0.192 | 0.065 |
+| x10 | edge-light | 0.000 ± 0.000 | 0.000 ± 0.000 | 0.256 | 0.069 |
+| x10 | edge-full | 0.666 ± 0.006 | 0.990 ± 0.006 | 0.127 | 0.060 |
+| x10 | greedy-finish | 0.172 ± 0.011 | 0.270 ± 0.016 | 0.136 | 0.060 |
+| x10 | edge-adaptive | 0.063 ± 0.005 | 0.099 ± 0.008 | 0.140 | 0.060 |
+| x10 | queue-greedy | 0.055 ± 0.005 | 0.086 ± 0.008 | 0.139 | 0.060 |
+| x10 | risk-split | 0.000 ± 0.000 | 0.000 ± 0.000 | 0.145 | 0.059 |
+| x10 | random | 0.562 ± 0.005 | 0.787 ± 0.007 | 0.192 | 0.064 |
+
+At x1, `queue-greedy` already meets every deadline with the full model on every window
+(false alerts 0.127). Fog-only and cloud-only placement saturate the uplinks (at x10 about
+2 230 windows never finish).
+
+![Deadline misses against load](figures/ids-place-medium-miss-vs-load.png)
+
+![Timeliness against alert quality at x10](figures/ids-place-medium-x10-tradeoff.png)
+
+Findings:
+
+1. **Queue awareness is what matters among the greedy rules.** With the same decision
+   rule, the queue-aware estimate cuts deadline misses from 0.41 to 0.05 at x3.
+2. **`risk-split` meets every deadline at every load** and keeps false alerts at 0.145,
+   because the windows that need speed (high pre-filter score) are mostly attack traffic,
+   where the cheap model loses little. `edge-light` meets every deadline too, at 0.256.
+3. **The remaining headroom is narrow.** The best conceivable point is every deadline met
+   with false alerts at the full model's rate (0.127). The best baseline (`risk-split`) is
+   1.8 points above it, and the queue-aware greedy rules trade about 5 % deadline misses
+   for 1.2 points. How much of this gap an optimizer can close, and whether the scenario
+   needs to be harder (one gateway core for IDS, a heavier third model, more short-deadline
+   traffic) to leave room for one, is the question for M5 (per-epoch exact oracle).
+
+## 9. Open Points for v1 Freeze
 
 - Whether a scheduler may re-plan tasks that were placed but have not started (this
   enlarges the per-epoch decision and is relevant for QUBO size).

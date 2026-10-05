@@ -35,7 +35,19 @@ def main():
                      help="greedy-finish or <edge|fog|cloud>-<model>; repeatable (default: four baselines)")
     sim.add_argument("--decision-time", default="none", help="none, measured, or a fixed delay in seconds")
     sim.add_argument("--output", type=Path, default=None)
+    sweep = sub.add_parser("sweep", help="Run configs x seeds x policies and aggregate across seeds")
+    sweep.add_argument("--config", type=Path, action="append", required=True, help="Generator config; repeatable")
+    sweep.add_argument("--policy", action="append", required=True, help="Policy name; repeatable")
+    sweep.add_argument("--seeds", type=int, default=10, help="Number of seeds")
+    sweep.add_argument("--first-seed", type=int, default=1)
+    sweep.add_argument("--decision-time", default="none", help="none, measured, or a fixed delay in seconds")
+    sweep.add_argument("--workers", type=int, default=2, help="Parallel simulations (one JVM each)")
+    sweep.add_argument("--name", default="sweep", help="Output folder name under artifacts/sweeps/")
+    sweep.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
+    if args.command == "sweep":
+        from .sweep import run_cli as run_sweep
+        return run_sweep(args, ROOT)
     if args.command == "simulate":
         from .simulate import run_cli
         return run_cli(args, ROOT)

@@ -54,8 +54,9 @@ Instances run online in iFogSim through an epoch-based Java-Python bridge
 (`org.fogids.IdsOnline` + [`bridge.py`](src/fogids/bridge.py)). At every epoch with new
 tasks, Java sends a state snapshot as a JSON line and waits while a Python policy
 decides; simulated time stands still meanwhile, and decision time can be charged to
-the clock (`--decision-time none|measured|<seconds>`). Four reference policies are
-included: `edge-light`, `fog-full`, `cloud-full` and `greedy-finish`.
+the clock (`--decision-time none|measured|<seconds>`). Reference policies: fixed
+tier and model (`edge-light`, `edge-full`, `fog-full`, `cloud-full`, ...), `greedy-finish`,
+the queue-aware `edge-adaptive`, `queue-greedy` and `risk-split`, and `random`.
 
 ```bash
 fogids simulate --config configs/ids-place-small.json   # artifacts/runs/<instance>/
@@ -67,19 +68,30 @@ with deadline-miss rates per risk class, latency percentiles, missed detection
 (per class and macro-averaged), the false-alert rate on benign flows, energy, cloud
 cost and decision time.
 
+Run every (config, seed, policy) combination and aggregate across seeds with 95 %
+confidence intervals; results go to `artifacts/sweeps/<name>/` (tables, CSV, figures
+with `pip install -e '.[analysis]'`). Reference policies and multi-seed results:
+[docs/ids-place.md, section 8](docs/ids-place.md#8-baselines-and-multi-seed-results-milestone-m3).
+
+```bash
+fogids sweep --name demo --seeds 5 --config configs/ids-place-small-calibrated-x3.json \
+  --policy edge-light --policy queue-greedy --policy risk-split
+```
+
 Run the tests:
 
 ```bash
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-The 42 tests cover QUBO expansion, feasible-assignment costs, bounded slack,
+The 52 tests cover QUBO expansion, feasible-assignment costs, bounded slack,
 seeded SA, configuration validation, Java integration, the IDS-PLACE problem model
 (eligibility, transfer and compute times, validation), and the instance generator
 (determinism, a cross-platform fingerprint, burst and chunking behaviour), and the
 online bridge against analytic timings (epoch boundaries, transfer plus compute,
 cold starts, CPU sharing, decision delay, snapshot state, invalid assignments), the
-detection metrics (false alerts, per-class and macro missed detection), and the
+detection metrics (false alerts, per-class and macro missed detection), the queue-aware
+scheduler estimate and every reference policy, the multi-seed aggregation, and the
 calibration helpers (one of them needs NumPy and is skipped without it). Simulation checks
 include local compute time, cloud network transfer, shared CPU execution,
 decision delay, and unfinished tasks.
