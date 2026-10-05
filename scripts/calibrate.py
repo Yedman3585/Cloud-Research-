@@ -11,6 +11,8 @@ Pipeline (each step can be run on its own; ``all`` runs them in order):
   time     measure single-thread CPU inference time of one window as a function
            of the number of flows, plus cold-start time and memory, in a fresh
            process per model; fit time = fixed + per_flow * flows;
+  traffic  measure how intense each traffic class is in the captures (records per
+           second, from the packet rate and packets per record of every row);
   configs  convert the measurements into a hardware profile
            (configs/calibration-<profile>.json) and write calibrated generator
            configs (configs/ids-place-*-calibrated.json); refresh the results
@@ -24,6 +26,13 @@ flows of an attack class that the model flags as any attack, which is what the
 simulator's missed-detection metric uses. For ``full`` the reported recall is
 measured with part of the context replaced by unrelated records (``--eval-rho``),
 which stands for traffic of other hosts mixed in at the same gateway.
+
+Node speeds: work is measured on one core of the measuring machine; edge and fog
+nodes are rated relative to that core with published single/multi-core benchmark
+ratios (``HARDWARE``), selectable with ``--edge`` and ``--fog``. Attack bursts in the
+calibrated configs get the class intensities measured by ``traffic``, relative to the
+benign rate; the absolute per-gateway volume stays a free parameter that is swept
+with ``--load-scales`` (configs ``*-calibrated-x<k>.json``).
 
 Requires the optional dependencies: ``pip install -e '.[calibration]'``.
 """
@@ -58,6 +67,15 @@ _EXACT = {
 }
 _PREFIX = (('DDoS', 'ddos'), ('DoS', 'dos'), ('Mirai', 'mirai'), ('Recon', 'recon'))
 TIMING_FLOWS = (1, 2, 5, 10, 20, 50, 100, 200, 500, 1000)
+# Speed of a device relative to one performance core of Apple M2, from Geekbench 5
+# (cpu-monkey.com): M2 single-core 1874, M2 multi-core 8853, Raspberry Pi 4 B multi-core
+# 601, Raspberry Pi 5 multi-core 1635. A proxy for inference speed, not a measurement.
+HARDWARE = {
+    'm2-core': ('Apple M2, one performance core', 1.0),
+    'm2-chip': ('Apple M2, all 8 cores', 8853 / 1874),
+    'rpi4': ('Raspberry Pi 4 Model B, 4 x Cortex-A72 1.5 GHz', 601 / 1874),
+    'rpi5': ('Raspberry Pi 5, 4 x Cortex-A76 2.4 GHz', 1635 / 1874),
+}
 BLOCK = 200  # rows per contiguous block; blocks are the unit of sampling and splitting
 CONTEXT = 16  # records seen by the full model: the flow itself and the 15 before it
 
@@ -94,20 +112,32 @@ def fit_linear(xs, ys):
     return a, b, (1 - ss_res / ss_tot) if ss_tot > 0 else 1.0
 
 
-def calibrated_config(base, profile, n_features):
-    """Copy a generator config and replace model costs and recalls by a profile."""
+def calibrated_config(base, profile, n_features, scale=1.0):
+    """Copy a generator config and apply a profile: model costs and recalls, node speeds,
+    class-relative burst intensities; ``scale`` multiplies every traffic rate."""
     out = json.loads(json.dumps(base))
-    out['name'] = base['name'] + '-calibrated'
+    suffix = '' if scale == 1 else f'-x{scale:g}'
+    out['name'] = base['name'] + '-calibrated' + suffix
     out['calibrated'] = True
     out['_comment'] = (f"Model costs and recalls calibrated on CICIoT2023, hardware profile "
-                       f"'{profile['profile']}' (configs/calibration-{profile['profile']}.json).")
-    out['calibration'] = {'profile': profile['profile'], 'ref_mips': profile['ref_mips']}
+                       f"'{profile['profile']}' (configs/calibration-{profile['profile']}.json); "
+                       f"traffic volume x{scale:g} of the base config.")
+    out['calibration'] = {'profile': profile['profile'], 'ref_mips': profile['ref_mips'], 'load_scale': scale}
     by_name = {m['name']: m for m in profile['models']}
     for m in out['models']:
         p = by_name[m['name']]
         m.update(fixed_mi=p['fixed_mi'], mi_per_flow=p['mi_per_flow'], memory_mb=p['memory_mb'],
                  load_s=p['load_s'], recall={c: p['recall'][c] for c in ATTACKS})
     out['traffic']['bytes_per_flow'] = 4 * n_features  # one float32 feature vector per flow
+    for tier, spec in profile.get('tiers', {}).items():
+        out['topology'][tier]['mips'] = spec['mips']
+    rates = out['traffic']['benign_flows_per_s']
+    out['traffic']['benign_flows_per_s'] = ([r * scale for r in rates] if isinstance(rates, list)
+                                            else rates * scale)
+    ratio = profile.get('traffic', {}).get('class_ratio')
+    benign = rates[0] if isinstance(rates, list) else rates
+    for burst in out['attacks']:
+        burst['flows_per_s'] = round((benign * ratio[burst['class']] if ratio else burst['flows_per_s']) * scale, 1)
     return out
 
 
@@ -215,6 +245,35 @@ def prepare(raw, out, cap, seed, drop=()):
     missing = [c for c in CLASSES if summary['kept_per_class'][c] == 0]
     if missing:
         print(f'WARNING: no rows for classes {missing}; download more CSV files.')
+
+
+def traffic(raw, out):
+    """Records per second of every label: median over rows of packet rate / packets per record.
+
+    The absolute rate depends on the testbed; what the configs use is the ratio of each
+    class to benign traffic (median over the labels of a class).
+    """
+    import numpy as np
+    import pandas as pd
+    files = sorted(Path(raw).rglob('*.csv'))
+    if not files or any(c.strip().lower() == 'label' for c in pd.read_csv(files[0], nrows=0).columns):
+        raise SystemExit('traffic needs the 2024 folder-per-label layout')
+    per_label = {}
+    for i, f in enumerate(files):
+        d = pd.read_csv(f, usecols=['Rate', 'Number'])
+        per_label.setdefault(file_label(f), []).append(d['Rate'] / d['Number'].clip(lower=1))
+        if (i + 1) % 50 == 0 or i + 1 == len(files):
+            print(f'[{i + 1}/{len(files)}] read')
+    labels = {l: float(pd.concat(v).median()) for l, v in sorted(per_label.items())}
+    by_class = {}
+    for l, rate in labels.items():
+        by_class.setdefault(label_group(l), []).append(rate)
+    class_rate = {c: float(np.median(v)) for c, v in by_class.items()}
+    ratio = {c: class_rate[c] / class_rate[BENIGN] for c in class_rate}
+    result = {'labels': labels,
+              'class_records_per_s': class_rate, 'class_ratio': ratio}
+    _write_json(out, result)
+    print(json.dumps({c: round(r, 2) for c, r in ratio.items()}, indent=2))
 
 
 # Models ----------------------------------------------------------------------
@@ -486,7 +545,7 @@ def measure(work, min_seconds, min_repeats):
 
 # Step 4: profile, configs, report --------------------------------------------
 
-def write_configs(work, sample_path, profile_name, ref_mips):
+def write_configs(work, sample_path, profile_name, ref_mips, edge='rpi4', fog='m2-chip', scales=(1,)):
     timing = _read_json(work / 'timing.json')
     models = []
     for kind in ('light', 'full'):
@@ -509,16 +568,47 @@ def write_configs(work, sample_path, profile_name, ref_mips):
                'threads': timing['threads'], 'dataset': {k: sample[k] for k in
                                                           ('files', 'cap_per_label', 'seed', 'features', 'rows',
                                                            'kept_per_class')},
-               'models': models}
+               'models': models,
+               'tiers': {tier: {'device': HARDWARE[key][0], 'key': key, 'ratio_to_reference_core':
+                                round(HARDWARE[key][1], 4), 'mips': round(ref_mips * HARDWARE[key][1])}
+                         for tier, key in (('edge', edge), ('fog', fog))}}
+    if (work / 'traffic.json').exists():
+        profile['traffic'] = _read_json(work / 'traffic.json')
+    else:
+        print('No traffic.json: burst intensities stay as in the base configs (run the traffic step).')
     _write_json(ROOT / 'configs' / f'calibration-{profile_name}.json', profile)
+    loads = {}
     for name in BASE_CONFIGS:
         base = _read_json(ROOT / 'configs' / f'{name}.json')
-        _write_json(ROOT / 'configs' / f'{name}-calibrated.json', calibrated_config(base, profile, sample['features']))
-    _update_report(profile, timing)
+        for scale in scales:
+            config = calibrated_config(base, profile, sample['features'], scale)
+            _write_json(ROOT / 'configs' / f"{config['name']}.json", config)
+            if name == 'ids-place-medium':
+                loads[config['name']] = offered_load(config)
+    _update_report(profile, timing, loads)
     print(f'Wrote configs/calibration-{profile_name}.json and calibrated configs.')
 
 
-def _update_report(profile, timing):
+def offered_load(config):
+    """Peak and mean one-second utilization if every task ran the full model on its own
+    gateway, and peak fog utilization if every task were sent to its fog node."""
+    sys.path.insert(0, str(ROOT / 'src'))
+    from fogids.generator import generate
+    inst = generate(config)
+    full = max(inst.models, key=lambda m: m.mi_per_flow)
+    edge, fog = {}, {}
+    for t in inst.tasks:
+        work, second = full.work_mi(t.n_flows), int(t.release_s)
+        edge[(t.gateway, second)] = edge.get((t.gateway, second), 0.0) + work
+        parent = inst.node(t.gateway).parent
+        fog[(parent, second)] = fog.get((parent, second), 0.0) + work
+    edge_mips, fog_mips = inst.tier('edge')[0].mips, inst.tier('fog')[0].mips
+    return {'tasks': len(inst.tasks), 'edge_peak': max(edge.values()) / edge_mips,
+            'edge_mean': sum(edge.values()) / (len(inst.tier('edge')) * inst.horizon_s * edge_mips),
+            'fog_peak_all_offloaded': max(fog.values()) / fog_mips}
+
+
+def _update_report(profile, timing, loads=None):
     hw = profile['hardware']
     cpu = hw.get('machdep.cpu.brand_string') or hw.get('processor') or hw['machine']
     lines = [f"Profile `{profile['profile']}`: {cpu}, {hw['platform']}, Python {hw['python']}, "
@@ -546,6 +636,20 @@ def _update_report(profile, timing):
               '|---|' + '---|' * (len(ATTACKS) + 2)]
     for name, rec, bal, fpr in rows:
         lines.append(f"| {name} | " + ' | '.join(f"{rec[c]:.4f}" for c in ATTACKS) + f" | {bal:.4f} | {fpr:.4f} |")
+    if profile.get('tiers'):
+        lines += ['', 'Node speeds: ' + '; '.join(f"{t} = {v['device']}, {v['ratio_to_reference_core']} x reference "
+                                                 f"core = {v['mips']} MIPS" for t, v in profile['tiers'].items()) + '.']
+    if profile.get('traffic'):
+        r = profile['traffic']['class_ratio']
+        lines += ['', 'Traffic intensity relative to benign (median records/s per class): ' +
+                  ', '.join(f"{c} {r[c]:.2f}" for c in CLASSES if c in r) + '.']
+    if loads:
+        lines += ['', 'Offered load with the full model (one-second bins): peak and mean utilization of a '
+                      'gateway that runs all its tasks itself, and peak fog utilization if all tasks go to fog:', '',
+                  '| Config | Tasks | Edge peak | Edge mean | Fog peak (all offloaded) |', '|---|---|---|---|---|']
+        for name, l in loads.items():
+            lines.append(f"| {name} | {l['tasks']} | {l['edge_peak']:.2f} | {l['edge_mean']:.3f} | "
+                         f"{l['fog_peak_all_offloaded']:.2f} |")
     lines += ['', 'Rows per class in the sample: ' +
               ', '.join(f'{c} {n}' for c, n in profile['dataset']['kept_per_class'].items()) + '.']
     text = REPORT.read_text(encoding='utf-8')
@@ -562,7 +666,7 @@ def main(argv=None):
         return probe(model, inputs, float(min_s), int(min_r))
     sys.stdout.reconfigure(line_buffering=True)  # progress stays visible when piped to tee
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('step', choices=('prepare', 'train', 'time', 'configs', 'all'))
+    p.add_argument('step', choices=('prepare', 'train', 'time', 'traffic', 'configs', 'all'))
     p.add_argument('--raw', type=Path, default=DATA / 'CICIoT2023', help='Directory with CICIoT2023 CSV files')
     # Kept outside the raw-data folder; on case-insensitive file systems data/ciciot2023
     # and data/CICIoT2023 would be the same directory.
@@ -580,11 +684,15 @@ def main(argv=None):
     p.add_argument('--min-seconds', type=float, default=0.3, help='Minimum timing duration per window size')
     p.add_argument('--min-repeats', type=int, default=50)
     p.add_argument('--profile', default='mac', help='Hardware profile name')
+    p.add_argument('--edge', choices=sorted(HARDWARE), default='rpi4', help='Device modelled as an edge gateway')
+    p.add_argument('--fog', choices=sorted(HARDWARE), default='m2-chip', help='Device modelled as a fog node')
+    p.add_argument('--load-scales', type=float, nargs='+', default=[1, 3, 10],
+                   help='Traffic volume multipliers; one set of calibrated configs per value')
     p.add_argument('--ref-mips', type=float, default=None,
                    help='MIPS of one measuring core (default: fog MIPS of ids-place-small)')
     a = p.parse_args(argv)
     ref_mips = a.ref_mips or _read_json(ROOT / 'configs' / 'ids-place-small.json')['topology']['fog']['mips']
-    steps = ('prepare', 'train', 'time', 'configs') if a.step == 'all' else (a.step,)
+    steps = ('prepare', 'train', 'time', 'traffic', 'configs') if a.step == 'all' else (a.step,)
     for step in steps:
         if step == 'prepare':
             prepare(a.raw, a.sample, a.cap, a.seed, tuple(a.drop))
@@ -594,8 +702,11 @@ def main(argv=None):
                       a.train_rho, a.eval_rho)
         elif step == 'time':
             measure(WORK, a.min_seconds, a.min_repeats)
+        elif step == 'traffic':
+            traffic(a.raw, WORK / 'traffic.json')
         else:
-            write_configs(WORK, a.sample, a.profile, ref_mips)
+            write_configs(WORK, a.sample, a.profile, ref_mips, a.edge, a.fog,
+                          tuple(int(x) if x == int(x) else x for x in a.load_scales))
     return 0
 
 

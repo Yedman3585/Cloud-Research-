@@ -93,6 +93,33 @@ such core, an edge gateway (2000 MIPS) as a quarter of it and the cloud as eight
 a modelling assumption, recorded in the profile; a second profile measured on other
 hardware tests its sensitivity.
 
+## Node speeds
+
+Work is measured on one M2 performance core (`ref_mips` = 8000 MIPS). Other devices are
+rated relative to that core with Geekbench 5 scores (cpu-monkey.com): M2 single-core
+1874, M2 multi-core 8853, Raspberry Pi 4 B multi-core 601, Raspberry Pi 5 multi-core 1635.
+Default tiers: **edge = Raspberry Pi 4 B, all four cores** (0.32 × core = 2566 MIPS), **fog
+= Apple M2, all cores** (4.72 × core = 37 793 MIPS); the cloud keeps the base value
+(64 000 MIPS). `--edge` and `--fog` select other devices (`m2-core`, `m2-chip`, `rpi4`,
+`rpi5`). Benchmark ratios are a proxy: PyTorch on the M2 can use its matrix unit, so
+inference on a Pi may be slower than the ratio suggests. A timing run on a real gateway
+device (a second hardware profile) would replace the proxy.
+
+## Traffic intensity
+
+Each row of the 2024 release reports the packet rate of its window (`Rate`, packets/s)
+and the packets it covers (`Number`: 10 for most labels, 100 for DDoS, DoS and Mirai), so
+`Rate / Number` is a rate of records per second. The `traffic` step takes its median per
+label and the median over the labels of a class. The absolute rates belong to the
+testbed; the calibrated configs use only the **ratio of each class to benign traffic**:
+every burst gets `flows_per_s = benign_flows_per_s × ratio(class)`.
+
+The absolute volume per gateway (`benign_flows_per_s`, 300 records/s in the base configs)
+is not observable in the captures and is the main free parameter. Instead of tuning it,
+configs are written for several **load scales** (`--load-scales`, default 1, 3, 10; files
+`ids-place-*-calibrated.json`, `*-calibrated-x3.json`, `*-calibrated-x10.json`), which
+multiply all traffic rates. Results should be reported as a function of this scale.
+
 `bytes_per_flow` becomes the size of one float32 feature vector (4 × F bytes, 156 for 39 features).
 
 ## Results
@@ -113,6 +140,18 @@ Test blocks: detection recall per class, balanced 8-class accuracy, benign false
 | light | 1.0000 | 1.0000 | 1.0000 | 0.8549 | 0.8503 | 0.8708 | 0.8565 | 0.7158 | 0.2559 |
 | full, clean context | 1.0000 | 1.0000 | 1.0000 | 0.8713 | 0.9050 | 0.9679 | 0.9502 | 0.8655 | 0.1056 |
 | full, 50% of context replaced (used) | 1.0000 | 1.0000 | 1.0000 | 0.8436 | 0.8627 | 0.9169 | 0.9087 | 0.8044 | 0.1268 |
+
+Node speeds: edge = Raspberry Pi 4 Model B, 4 x Cortex-A72 1.5 GHz, 0.3207 x reference core = 2566 MIPS; fog = Apple M2, all 8 cores, 4.7241 x reference core = 37793 MIPS.
+
+Traffic intensity relative to benign (median records/s per class): benign 1.00, ddos 15.84, dos 12.28, mirai 2.76, recon 1.24, spoofing 3.42, web 0.38, bruteforce 0.62.
+
+Offered load with the full model (one-second bins): peak and mean utilization of a gateway that runs all its tasks itself, and peak fog utilization if all tasks go to fog:
+
+| Config | Tasks | Edge peak | Edge mean | Fog peak (all offloaded) |
+|---|---|---|---|---|
+| ids-place-medium-calibrated | 2753 | 0.22 | 0.031 | 0.07 |
+| ids-place-medium-calibrated-x3 | 5306 | 1.19 | 0.091 | 0.25 |
+| ids-place-medium-calibrated-x10 | 15908 | 3.89 | 0.304 | 0.83 |
 
 Rows per class in the sample: benign 20000, ddos 240000, dos 80000, mirai 60000, recon 82200, spoofing 40000, web 24600, bruteforce 13000.
 <!-- results:end -->
@@ -143,6 +182,20 @@ Rows per class in the sample: benign 20000, ddos 240000, dos 80000, mirai 60000,
 4. The benign false-positive rate (≈28 % for both networks at the class-weighted
    operating point) is not yet part of the simulator's metrics.
 
+## Findings of version 2 (context `full`, profile `mac`, 5 October 2026)
+
+1. **Context pays off.** With half of the context replaced by unrelated records, `full`
+   reaches balanced accuracy 0.804 against 0.716 for `light` and halves benign false
+   positives (12.7 % vs 25.6 %); recall rises most on web (0.92 vs 0.87) and brute force
+   (0.91 vs 0.86) and stays level on recon and spoofing. With clean context: 0.866 and
+   10.6 %.
+2. **`full` costs 73× more than `light`** (12.7 ms vs 0.17 ms per 1000-flow window on one
+   M2 core), but is cheap in absolute terms. At the base traffic volume a gateway could
+   run `full` on all its tasks with a peak one-second utilization well below 1; placement
+   becomes a real trade-off only at higher volumes (see the offered-load table above).
+3. **Benign false positives are not yet a simulator metric**, so the main advantage of
+   `full` is invisible to schedulers and to the reported results until they are.
+
 ## Reproduce
 
 ```bash
@@ -152,7 +205,9 @@ python scripts/calibrate.py all --profile mac
 fogids simulate --config configs/ids-place-small-calibrated.json
 ```
 
-Individual steps: `prepare`, `train [--model light|full]`, `time`, `configs`.
+Individual steps: `prepare`, `train [--model light|full]`, `time`, `traffic`, `configs`.
+To change only node speeds or load scales, rerun `traffic` (once) and `configs`; models
+need not be retrained.
 The sample goes to `data/ciciot2023-sample.npz`, intermediate files to `artifacts/calibration/`.
 
 ## Limitations

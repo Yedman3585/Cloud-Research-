@@ -46,6 +46,25 @@ class CalibrationTests(unittest.TestCase):
         self.assertTrue(instance.meta['calibrated'])
         self.assertEqual(instance.model('full').mi_per_flow, 0.01)
 
+    def test_profile_sets_node_speeds_and_scaled_class_intensities(self):
+        base = json.loads((ROOT / 'configs/ids-place-small.json').read_text(encoding='utf-8'))
+        recall = {c: 0.9 for c in calibrate.ATTACKS}
+        ratio = {c: 1.0 for c in calibrate.CLASSES}
+        ratio.update(ddos=10.0, recon=2.0)
+        profile = {'profile': 'test', 'ref_mips': 8000, 'traffic': {'class_ratio': ratio},
+                   'tiers': {'edge': {'mips': 2566}, 'fog': {'mips': 37793}},
+                   'models': [{'name': n, 'fixed_mi': 0.5, 'mi_per_flow': 0.01, 'memory_mb': 20,
+                               'load_s': 0.05, 'recall': recall} for n in ('light', 'full')]}
+        config = calibrate.calibrated_config(base, profile, n_features=39, scale=3)
+        self.assertEqual(config['name'], 'ids-place-small-calibrated-x3')
+        self.assertEqual(config['topology']['edge']['mips'], 2566)
+        self.assertEqual(config['topology']['fog']['mips'], 37793)
+        self.assertEqual(config['traffic']['benign_flows_per_s'], 900)
+        bursts = {b['class']: b['flows_per_s'] for b in config['attacks']}
+        self.assertEqual(bursts, {'ddos': 9000.0, 'recon': 1800.0})
+        self.assertEqual(base['traffic']['benign_flows_per_s'], 300)  # base config untouched
+        generate(config)
+
 
 try:
     import numpy as np

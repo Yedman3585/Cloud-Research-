@@ -2,7 +2,7 @@
   "name": "ids-place-large-calibrated",
   "seed": 13,
   "calibrated": true,
-  "_comment": "Model costs and recalls calibrated on CICIoT2023, hardware profile 'mac' (configs/calibration-mac.json).",
+  "_comment": "Model costs and recalls calibrated on CICIoT2023, hardware profile 'mac' (configs/calibration-mac.json); traffic volume x1 of the base config.",
   "horizon_s": 60.0,
   "window_s": 1.0,
   "epoch_s": 0.1,
@@ -10,7 +10,7 @@
     "fog_nodes": 8,
     "gateways_per_fog": 16,
     "edge": {
-      "mips": 2000,
+      "mips": 2566,
       "memory_mb": 1024,
       "uplink_bytes_s": 1250000,
       "uplink_latency_s": 0.005,
@@ -22,7 +22,7 @@
       ]
     },
     "fog": {
-      "mips": 8000,
+      "mips": 37793,
       "memory_mb": 8192,
       "uplink_bytes_s": 12500000,
       "uplink_latency_s": 0.03,
@@ -105,7 +105,7 @@
       "duration_s": 6.0,
       "ramp_s": 2.0,
       "gateways": 0.25,
-      "flows_per_s": 2500
+      "flows_per_s": 827.4
     },
     {
       "class": "ddos",
@@ -113,7 +113,7 @@
       "duration_s": 12.0,
       "ramp_s": 1.0,
       "gateways": 0.5,
-      "flows_per_s": 4000
+      "flows_per_s": 4751.5
     },
     {
       "class": "recon",
@@ -121,7 +121,7 @@
       "duration_s": 6.0,
       "ramp_s": 0.0,
       "gateways": 0.25,
-      "flows_per_s": 400
+      "flows_per_s": 371.8
     },
     {
       "class": "web",
@@ -129,11 +129,12 @@
       "duration_s": 8.0,
       "ramp_s": 0.0,
       "gateways": 0.125,
-      "flows_per_s": 150
+      "flows_per_s": 112.5
     }
   ],
   "calibration": {
     "profile": "mac",
-    "ref_mips": 8000
+    "ref_mips": 8000,
+    "load_scale": 1
   }
 }
