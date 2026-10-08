@@ -78,20 +78,26 @@ fogids sweep --name demo --seeds 5 --config configs/ids-place-small-calibrated-x
   --policy edge-light --policy queue-greedy --policy risk-split
 ```
 
+How far the baselines are from the best possible (a clairvoyant LP lower bound) and how
+well scheduler-side latency estimates predict the simulator:
+`fogids oracle --config <config> --seeds 3` (needs SciPy; see
+[docs/ids-place.md, section 9](docs/ids-place.md#9-headroom-and-estimate-fidelity-milestone-m5)).
+
 Run the tests:
 
 ```bash
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-The 52 tests cover QUBO expansion, feasible-assignment costs, bounded slack,
+The 57 tests cover QUBO expansion, feasible-assignment costs, bounded slack,
 seeded SA, configuration validation, Java integration, the IDS-PLACE problem model
 (eligibility, transfer and compute times, validation), and the instance generator
 (determinism, a cross-platform fingerprint, burst and chunking behaviour), and the
 online bridge against analytic timings (epoch boundaries, transfer plus compute,
 cold starts, CPU sharing, decision delay, snapshot state, invalid assignments), the
 detection metrics (false alerts, per-class and macro missed detection), the queue-aware
-scheduler estimate and every reference policy, the multi-seed aggregation, and the
+scheduler estimate and every reference policy, the multi-seed aggregation, the fluid
+lower bound and estimate-fidelity helpers (skipped without SciPy), and the
 calibration helpers (one of them needs NumPy and is skipped without it). Simulation checks
 include local compute time, cloud network transfer, shared CPU execution,
 decision delay, and unfinished tasks.

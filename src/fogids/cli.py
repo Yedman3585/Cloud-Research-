@@ -44,7 +44,16 @@ def main():
     sweep.add_argument("--workers", type=int, default=2, help="Parallel simulations (one JVM each)")
     sweep.add_argument("--name", default="sweep", help="Output folder name under artifacts/sweeps/")
     sweep.add_argument("--output", type=Path, default=None)
+    oracle = sub.add_parser("oracle", help="Fluid lower bound, simulated LP plan and estimate fidelity (M5)")
+    oracle.add_argument("--config", type=Path, action="append", required=True, help="Generator config; repeatable")
+    oracle.add_argument("--seeds", type=int, default=3)
+    oracle.add_argument("--first-seed", type=int, default=1)
+    oracle.add_argument("--name", default="oracle", help="Output folder name under artifacts/oracle/")
+    oracle.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
+    if args.command == "oracle":
+        from .oracle import run_cli as run_oracle
+        return run_oracle(args, ROOT)
     if args.command == "sweep":
         from .sweep import run_cli as run_sweep
         return run_sweep(args, ROOT)

@@ -52,6 +52,7 @@ class GreedyFinish(Policy):
         self.backlog = {n.name: 0.0 for n in instance.nodes}
         self.pending = {}
         self.quality = [m.name for m in _models_by_quality(instance)]
+        self.predicted = {}  # task id -> predicted finish time (for fidelity analysis)
 
     def decide(self, snapshot):
         for task_id, _ in snapshot.completed:
@@ -72,7 +73,8 @@ class GreedyFinish(Policy):
                     options.append((latency <= t.deadline_s, rank, latency, node, model, work))
             meeting = [o for o in options if o[0]]
             best = min(meeting, key=lambda o: (o[1], o[2])) if meeting else min(options, key=lambda o: o[2])
-            _, _, _, node, model, work = best
+            _, _, latency, node, model, work = best
+            self.predicted[t.id] = snapshot.t + latency
             self.backlog[node] += work
             self.pending[t.id] = (node, work)
             out.append((t.id, node, model))
@@ -137,13 +139,14 @@ class QueuePolicy(Policy):
         super().reset(instance)
         self.queues = QueueModel(instance)
         self.quality = [m.name for m in _models_by_quality(instance)]
+        self.predicted = {}  # task id -> predicted finish time (for fidelity analysis)
 
     def decide(self, snapshot):
         self.queues.sync(snapshot)
         out = []
         for t in sorted(snapshot.tasks, key=lambda t: (-t.weight, t.id)):
             node, model = self.choose(t, snapshot.t)
-            self.queues.commit(t, node, model, snapshot.t)
+            self.predicted[t.id] = self.queues.commit(t, node, model, snapshot.t)
             out.append((t.id, node, model))
         return out
 
@@ -216,6 +219,19 @@ class RandomPolicy(Policy):
             models = self.instance.models
             out.append((t.id, node, models[int(self.rng.random() * len(models))].name))
         return out
+
+
+class Planned(Policy):
+    """Replays an offline plan {task_id: (node, model)}; tasks without a plan run the
+    fastest model at their gateway. Used to simulate the clairvoyant LP solution."""
+    name = 'lp-plan'
+
+    def __init__(self, plan):
+        self.plan = plan
+
+    def decide(self, snapshot):
+        fastest = min(self.instance.models, key=lambda m: m.mi_per_flow).name
+        return [(t.id, *self.plan.get(t.id, (t.gateway, fastest))) for t in snapshot.tasks]
 
 
 NAMED = {'greedy-finish': GreedyFinish, 'edge-adaptive': EdgeAdaptive, 'queue-greedy': QueueGreedy,

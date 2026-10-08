@@ -7,7 +7,7 @@ methods are compared on a frozen benchmark rather than the problem being tuned t
 method. Code: [`problem.py`](../src/fogids/problem.py) (model and instance format) and
 [`generator.py`](../src/fogids/generator.py) (seeded instances).
 
-Status: **v1 draft (milestones M1–M4).** The base configs carry placeholder model
+Status: **v1 draft (milestones M1–M5).** The base configs carry placeholder model
 parameters; the `*-calibrated*` configs carry values measured on CICIoT2023.
 
 ## 1. System
@@ -264,7 +264,72 @@ Findings:
    needs to be harder (one gateway core for IDS, a heavier third model, more short-deadline
    traffic) to leave room for one, is the question for M5 (per-epoch exact oracle).
 
-## 9. Open Points for v1 Freeze
+## 9. Headroom and Estimate Fidelity (milestone M5)
+
+`fogids oracle` ([`bounds.py`](../src/fogids/bounds.py), [`oracle.py`](../src/fogids/oracle.py))
+answers two questions on each instance.
+
+**How good can any policy be?** A clairvoyant linear-programming relaxation over the whole
+horizon: fractional placement x[i, m, k] for options whose queue-free transfer plus exclusive
+compute fits the deadline, a give-up variable per task, and capacity constraints for every
+CPU and uplink over a set of time intervals (a grid, every task window, and windows grown
+from each window start). These are necessary conditions, so the optimum is a lower bound on
+the false-alert rate at a given deadline-miss rate; it is optimistic (fluid work, no queue
+order, only some intervals). Replaying the LP plan in the simulator (`lp-plan`) shows how
+optimistic: it misses 31 % of deadlines at x3 and 12 % at x10.
+
+**How well do scheduler estimates predict the simulator?** Every queue-aware policy and
+`greedy-finish` record the finish time they predicted for each task; we compare with the
+simulated finish (Spearman rank correlation of latencies, agreement on meeting the deadline,
+and broken promises: predicted to meet, actually missed).
+
+Medium instance, calibrated models, seeds 1–3, decision time not charged:
+
+| Load | Policy | Miss rate | False alerts | Latency rank corr. | Broken promises |
+|---|---|---|---|---|---|
+| x1 | fluid bound | 0 | 0.1268 | — | — |
+| x1 | queue-greedy | 0.000 | 0.1268 | 0.90 | 0.000 |
+| x1 | risk-split | 0.000 | 0.1449 | 1.00 | 0.000 |
+| x3 | fluid bound | 0 | 0.1308 | — | — |
+| x3 | queue-greedy | 0.055 | 0.1331 | 0.05 | 0.056 |
+| x3 | edge-adaptive | 0.057 | 0.1344 | −0.05 | 0.059 |
+| x3 | greedy-finish (queue-free) | 0.410 | 0.1268 | 0.92 | 0.310 |
+| x3 | risk-split | 0.000 | 0.1452 | 0.96 | 0.000 |
+| x10 | fluid bound | 0 | 0.1374 | — | — |
+| x10 | queue-greedy | 0.052 | 0.1386 | −0.57 | 0.057 |
+| x10 | edge-adaptive | 0.061 | 0.1394 | −0.58 | 0.071 |
+| x10 | greedy-finish (queue-free) | 0.177 | 0.1360 | −0.26 | 0.171 |
+| x10 | risk-split | 0.000 | 0.1452 | 0.88 | 0.000 |
+
+Findings:
+
+1. **x1 is solved**: `queue-greedy` reaches the bound (every deadline met, every window on
+   the full model).
+2. **The headroom over the best baseline is small.** At equal (zero) deadline misses,
+   `risk-split` is at most 1.4 points of false alerts above the bound at x3 and 0.8 points
+   at x10, and the true gap is smaller because the bound is optimistic.
+3. **Hand-built estimates break exactly where decisions matter.** Under load, the
+   queue-aware estimate's latency ranking is uncorrelated or inversely correlated with the
+   simulator (−0.57 at x10), and every deadline miss of `queue-greedy` and `edge-adaptive` is
+   a broken promise. The cause is processor sharing: tasks that arrive later slow down
+   tasks already running, which a scheduler-side queue model does not see. `risk-split`
+   predicts well only because it keeps short-deadline work on the cheap model. A policy
+   with an accurate latency model could keep queue-greedy's false-alert rate (about 1 point
+   below `risk-split`) without its misses, but it would gain at most the remaining 1 point.
+4. **Consequence for the method.** On the calibrated scenario a learned scheduler can gain
+   about one point of false alerts. A stronger case for learning needs a scenario where
+   simple rules leave more on the table: one gateway core for IDS instead of four, a heavier
+   third model, more short-deadline benign traffic, or lateral fog offloading.
+
+```bash
+pip install -e '.[analysis]'          # scipy for the LP, matplotlib for figures
+fogids oracle --name m5 --seeds 3 \
+  --config configs/ids-place-medium-calibrated.json \
+  --config configs/ids-place-medium-calibrated-x3.json \
+  --config configs/ids-place-medium-calibrated-x10.json
+```
+
+## 10. Open Points for v1 Freeze
 
 - Whether a scheduler may re-plan tasks that were placed but have not started (this
   enlarges the per-epoch decision and is relevant for QUBO size).
