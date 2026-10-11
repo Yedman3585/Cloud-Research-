@@ -117,9 +117,63 @@ python scripts/ps_eval.py --seeds 2 3 4 5 6 \
 `ps-greedy` is not yet registered in `policies.by_name`, so `fogids simulate`, `sweep`
 and `oracle` do not list it; `scripts/ps_eval.py` imports it directly.
 
+## Epoch QUBO (`qubo-ps`)
+
+Code: [`qubo_place.py`](../src/fogids/qubo_place.py), tests
+[`test_qubo_place.py`](../tests/test_qubo_place.py).
+
+At every epoch the released tasks are placed jointly. Variables x_o = 1 if task i takes
+option o = (node, model), one option per task. Energy:
+
+- false alerts: `lam · benign_i · fpr_k` (benign flows estimated from the pre-filter);
+- CPU, exact for processor sharing of tasks starting together:
+  `gamma / MIPS · [Σ w_o a_o x_o + Σ_{o<p, same node} (w_o + w_p) min(a_o, a_p) x_o x_p]`,
+  plus linear terms `(w_o + w_j) min(a_o, r_j)` for every task j already on the node
+  (remaining work r_j from `PSModel`);
+- uplinks: current wait and transfer time of every link on the path (linear) and
+  `(w_o + w_p) min(b_o, b_p) / bandwidth` for two new tasks on the same link;
+- one option per task: `P (Σ x - 1)²` in the plain QUBO (`EpochQubo.to_qubo`); the
+  annealer moves between the options of one task, which keeps the constraint exactly.
+
+Weights w are 1 / deadline (normalised latency); optionally `1 / (margin + u)` with the
+predicted margin to the deadline (`urgency=u`), which makes latency expensive only where
+deadlines are tight. Options that cannot meet their deadline under the present load are
+dropped before the QUBO is built (the fastest model at the gateway is always kept), the
+QUBO is annealed for 20 ms, and the decoded assignment is checked task by task against
+`PSModel` (own deadline with the 10 % slack, no committed task pushed past its
+deadline); a failing task takes the `ps-greedy` choice.
+
+Tests: the CPU coefficients reproduce the processor-sharing sum of finish times; the
+plain QUBO equals the one-hot energy on every feasible assignment and penalises the
+empty one; the annealer finds the exhaustive optimum on a small epoch; a simulated run
+places every task once.
+
+`gamma` (latency weight) was chosen on seed 1 among 0, 1, 10, 100, 1000: 10 is the
+smallest value at which most annealed assignments pass the check unchanged (4.5 %
+repaired at x3); 0 reduces the QUBO to a false-alert minimiser that relies on repair
+(18 %), large values push work to the light model. Seeds 2–6:
+
+| Load | Policy | Miss rate | False alerts | Decision, ms |
+|---|---|---|---|---|
+| x1 | ps-greedy-s0.1 | 0 | 0.1268 | 0.5 |
+| x1 | qubo-ps | 0 | 0.1323 ± 0.0002 | 21.7 |
+| x3 | ps-greedy-s0.1 | 0.0002 ± 0.0005 | 0.1340 ± 0.0001 | 1.2 |
+| x3 | qubo-ps | **0** | 0.1349 ± 0.0001 | 25.6 |
+| x10 | ps-greedy-s0.1 | 0.0027 ± 0.0018 | 0.1393 ± 0.0006 | 4.6 |
+| x10 | qubo-ps | 0.0016 ± 0.0014 | 0.1399 ± 0.0006 | 53.6 |
+
+Reading: on the calibrated scenario the epoch QUBO is **on par with `ps-greedy-s0.1`,
+not better**. It removes the last misses at x3 and x10 at the cost of 0.1 point of false
+alerts, and at x1 it is 0.5 point worse because its latency term discourages the full
+model even where deadlines are comfortable (the urgency weighting reduces this: 0.1312
+at x1 on seed 1 with `urgency=0.2, gamma=10`). With at most 1.4 points between
+`risk-split` and the fluid bound, and `ps-greedy-s0.1` already within 0.3 points of the
+bound, joint optimisation has nothing left to win here. Its decision time (20 ms of
+annealing plus building) fits the 100 ms epoch but is ten times that of the greedy rule.
+Whether joint placement pays off must be shown on a scenario with more headroom.
+
 ## Next
 
-- An epoch QUBO built on the exact processor-sharing term (and FIFO link terms),
-  solved by annealing within the epoch budget, with `ps-greedy` as fallback.
-- The same comparison on a scenario with more headroom (feature extraction as gateway
-  CPU work, a model ladder), screened with the fluid bound first.
+- A harder, realistic scenario (feature extraction as gateway CPU work, a model ladder,
+  background load), screened with the fluid bound before any method is compared on it.
+- Faster QUBO construction (it now calls the processor-sharing model per option).

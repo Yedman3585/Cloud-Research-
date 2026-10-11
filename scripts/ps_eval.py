@@ -2,7 +2,7 @@
 
 For every (config, seed): the fluid lower bound, risk-split and queue-greedy (with
 their decisions replayed through PSModel, so both latency estimators are scored on
-identical decisions), ps-greedy without and with deadline slack. Writes one JSON line
+identical decisions), ps-greedy without and with deadline slack, and the epoch QUBO (qubo-ps). Writes one JSON line
 per run and a Markdown table of means with 95 % Student-t half-widths.
 
     python scripts/ps_eval.py --seeds 2 3 4 5 6 \
@@ -25,7 +25,7 @@ POLICIES = ('risk-split', 'queue-greedy', 'ps-greedy', 'ps-greedy-s0.1')
 
 
 def run(job):
-    config_path, seed, slack = job
+    config_path, seed, slack, gamma = job
     from fogids.bounds import fluid_bound
     from fogids.bridge import simulate
     from fogids.generator import generate, load_config
@@ -33,6 +33,7 @@ def run(job):
     from fogids.oracle import fidelity
     from fogids.policies import by_name
     from fogids.ps_policies import PSGreedy, Shadow
+    from fogids.qubo_place import QuboPlace
     config = load_config(config_path)
     config['seed'] = seed
     instance = generate(config)
@@ -40,11 +41,15 @@ def run(job):
     bound = fluid_bound(instance)
     rows = [{**base, 'policy': 'fluid-bound', 'miss': bound['deadline_miss_rate'], 'fa': bound['false_alert_rate']}]
     for name, policy in (('risk-split', Shadow(by_name('risk-split'))), ('queue-greedy', Shadow(by_name('queue-greedy'))),
-                         ('ps-greedy', PSGreedy(0.0)), (f'ps-greedy-s{slack:g}', PSGreedy(slack))):
+                         ('ps-greedy', PSGreedy(0.0)), (f'ps-greedy-s{slack:g}', PSGreedy(slack)),
+                         ('qubo-ps', QuboPlace(gamma=gamma, slack=slack))):
         end = simulate(instance, policy, timeout_s=3600)
         s = summarize(instance, end)
         row = {**base, 'policy': name, 'miss': s['all']['deadline_miss_rate'], 'fa': s['false_alert_rate'],
                'macro': s['missed_attack_macro'], 'decision_ms': 1000 * s['decision_mean_s']}
+        if hasattr(policy, 'stats') and policy.stats.get('tasks'):
+            row['repaired'] = policy.stats['repaired'] / policy.stats['tasks']
+            row['variables_per_epoch'] = policy.stats['variables'] / policy.stats['epochs']
         if isinstance(policy, Shadow):  # the policy's own estimate on its own decisions
             own = fidelity(instance, policy.inner.predicted, end)
             row.update(own_spearman=own.get('spearman'), own_mae_s=own.get('mae_s'),
@@ -85,11 +90,12 @@ def main():
     parser.add_argument('--config', type=Path, action='append', required=True)
     parser.add_argument('--seeds', type=int, nargs='+', default=[2, 3, 4, 5, 6])
     parser.add_argument('--slack', type=float, default=0.1)
+    parser.add_argument('--gamma', type=float, default=10.0, help='Latency weight of the epoch QUBO')
     parser.add_argument('--workers', type=int, default=2)
     parser.add_argument('--output', type=Path, default=ROOT / 'artifacts/ps-eval')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    jobs = [(str(c), s, args.slack) for c in args.config for s in args.seeds]
+    jobs = [(str(c), s, args.slack, args.gamma) for c in args.config for s in args.seeds]
     rows = []
     with ProcessPoolExecutor(args.workers) as pool, (args.output / 'runs.jsonl').open('w', encoding='utf-8') as f:
         for result in pool.map(run, jobs):

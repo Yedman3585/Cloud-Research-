@@ -176,6 +176,7 @@ sequenceDiagram
 | `src/fogids/oracle.py` | `fogids oracle`: граница, проигрывание LP-плана (`Planned`, `lp-plan`) и точность оценок политик — Спирмен прогноз/факт, MAE, доля «нарушенных обещаний» (`fidelity`) |
 | `src/fogids/ps_model.py` | `PSModel`: копия модели ресурсов симулятора на стороне планировщика — FIFO-каналы и **равное деление CPU**; предсказывает время завершения кандидата и новое время уже размещённых задач. `ps_finish_times`, `ps_sum_of_finish_times` (замкнутая квадратичная форма) |
 | `src/fogids/ps_policies.py` | `ps-greedy` (с запасом по дедлайну `slack`) и `Shadow` (решения другой политики, прогнозы `PSModel`) |
+| `src/fogids/qubo_place.py` | QUBO эпохи (`build_epoch`, `EpochQubo`: линейные и парные коэффициенты, `to_qubo` с one-hot-штрафом, отжиг с ходами внутри одной задачи) и политика `qubo-ps` с проверкой через `PSModel` и запасным `ps-greedy` |
 
 ### 3.6 Политики
 
@@ -282,7 +283,7 @@ CloudSim делит CPU поровну между идущими задачам�
 
 ---
 
-## 6. Тесты (`tests/`, 64 теста)
+## 6. Тесты (`tests/`, 68 тестов)
 
 | Файл | Тестов | Что проверяет | Нужен iFogSim |
 |---|---|---|---|
@@ -296,6 +297,7 @@ CloudSim делит CPU поровну между идущими задачам�
 | `test_sweep.py` | 3 | агрегация, интервалы; один прогон целиком | частично |
 | `test_calibration.py` | 5 | метки, подгонка прямой, калиброванные конфиги, блоки и окна контекста | нет (numpy для одного) |
 | `test_oracle.py` | 5 | граница на простых случаях, граница не выше простых назначений, Спирмен, нарушенные обещания | нет (SciPy) |
+| `test_qubo_place.py` | 4 | коэффициенты CPU = сумма времён при равном делении; QUBO с one-hot-штрафом = энергия на допустимых назначениях; отжиг находит точный оптимум малой эпохи; прогон в симуляторе | частично |
 | `test_ps_model.py` | 7 | равное деление CPU против аналитики, замкнутая форма против симуляции и как квадратичная форма, `PSModel` против симулятора, `ps-greedy` | частично |
 
 Запуск: `python -m unittest discover -s tests`.
@@ -359,9 +361,10 @@ src/fogids/
   simulate.py, sweep.py      прогоны
   bounds.py, oracle.py       LP-граница, lp-plan, точность оценок (M5)
   ps_model.py, ps_policies.py  модель равного деления CPU, ps-greedy
+  qubo_place.py              QUBO эпохи и политика qubo-ps
   qubo.py, experiment.py     QUBO-демо
   cli.py                     команда fogids
-tests/                       64 теста
+tests/                       68 тестов
 papers/                      статьи для обзора литературы
 (не в Git) data/, artifacts/, vendor/ifogsim/, build/, .venv/, tmp/
 ```

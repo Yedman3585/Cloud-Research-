@@ -164,6 +164,17 @@ class PSModel:
         own = finishes.pop(task.id)
         return own, work, done, finishes
 
+    def jobs(self, node, now):
+        """Tasks committed to ``node`` and not yet finished at ``now``:
+        [(task_id, remaining MI)], running ones first, then those in transit."""
+        state = self.nodes[node]
+        state.advance(now)
+        return list(state.active.items()) + [(key, work) for _, key, work in state.pending]
+
+    def link_wait(self, link, now):
+        """Time until ``link`` is free for a new transfer."""
+        return max(0.0, self.link_free[link] - now)
+
     def finishes(self, node, now):
         """Current predicted finish times of the tasks committed to ``node``."""
         state = self.nodes[node]
