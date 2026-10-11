@@ -200,6 +200,47 @@ Rows per class in the sample: benign 20000, ddos 240000, dos 80000, mirai 60000,
    Before this, missed detection alone made `light` look as good as `full`. Results with
    both error kinds: [ids-place.md, section 7](ids-place.md#7-results-with-calibrated-models).
 
+## Feature extraction and flow sampling (inputs for a harder scenario, 11 October 2026)
+
+**Extraction cost.** `scripts/extract_cost.py` times CICIoT2023-style feature extraction:
+every packet is parsed with `dpkt` and the 39 window statistics are aggregated over 10 or
+100 packets. Packets are synthetic TCP/UDP/ICMP frames; parsing time hardly depends on
+content. A vectorised NumPy pass over already-parsed fields gives a lower bound.
+
+| Machine | dpkt, µs/packet (window 10 / 100) | NumPy statistics only, µs/packet |
+|---|---|---|
+| Apple M2, Python 3.12 | 7.73 / 7.17 | 0.055 / 0.031 |
+| Cloud x86 container | 16.4 | 0.06–0.08 |
+
+On the M2 the `full` model costs 12.3 µs per record, while extracting one record costs
+72 µs (10 packets) to 717 µs (100 packets): **feature extraction, not inference,
+dominates the gateway's CPU**. Scaled to a Raspberry Pi 4 (Geekbench ratio, §Node
+speeds), extraction alone needs 7 % of the gateway CPU for benign traffic
+(3 000 packets/s) and about eleven gateways' worth during a DDoS burst
+(~475 000 packets/s), or about 1.5 with an assumed compiled extractor at 1 µs/packet.
+Shipping raw packets instead is not an option on a 10 Mbit/s uplink. An overloaded
+gateway can only analyse a fraction of the flows.
+
+**Flow sampling.** `scripts/sampling_eval.py` measures the calibrated models when only
+every s-th flow is analysed (fraction f = 1/s): the context of `full` then consists of
+every s-th record. Held-out blocks, 20 950 targets (750 benign), context contamination
+rho = 0.5:
+
+| Stride s | full: benign FPR | recon | spoofing | web | bruteforce | ddos, dos, mirai |
+|---|---|---|---|---|---|---|
+| 1 | 0.149 | 0.849 | 0.867 | 0.891 | 0.924 | 1.000 |
+| 2 | 0.141 | 0.860 | 0.878 | 0.898 | 0.940 | 1.000 |
+| 4 | 0.171 | 0.847 | 0.895 | 0.906 | 0.911 | 1.000 |
+| 10 | 0.112 | 0.852 | 0.917 | 0.909 | 0.902 | 1.000 |
+| `light` (no context) | 0.259 | 0.857 | 0.852 | 0.867 | 0.851 | 1.000 |
+
+A sparser context does not degrade the per-flow quality of `full` (differences are
+within the noise of 15 benign test blocks). Sampling therefore acts through coverage
+only: a task analysed at fraction f has per-flow recall f · r and false-positive rate
+f · fpr. Flood classes are detected with recall 1.0 by both models, so a flood stays
+visible at any useful sampling rate, whereas the low-rate classes (recon, spoofing, web,
+brute force) are exactly the ones whose few flows sampling can lose.
+
 ## Reproduce
 
 ```bash
