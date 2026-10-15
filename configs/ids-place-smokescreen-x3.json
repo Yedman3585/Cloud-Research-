@@ -1,0 +1,219 @@
+{
+  "name": "ids-place-smokescreen-x3",
+  "seed": 12,
+  "calibrated": true,
+  "_comment": "Scenario v2: floods as a smokescreen for low-rate attacks. Topology and models as ids-place-medium-calibrated; feature extraction is gateway CPU work measured with dpkt on an M2 (docs/calibration.md); flood rates from CICIoT2023 class ratios at x1.",
+  "horizon_s": 60.0,
+  "window_s": 1.0,
+  "epoch_s": 0.1,
+  "topology": {
+    "fog_nodes": 4,
+    "gateways_per_fog": 8,
+    "edge": {
+      "mips": 2566,
+      "memory_mb": 1024,
+      "uplink_bytes_s": 1250000,
+      "uplink_latency_s": 0.005,
+      "idle_w": 2.5,
+      "busy_w": 6.0,
+      "cost_per_gi": 0.0,
+      "resident": [
+        "light"
+      ]
+    },
+    "fog": {
+      "mips": 37793,
+      "memory_mb": 8192,
+      "uplink_bytes_s": 12500000,
+      "uplink_latency_s": 0.03,
+      "idle_w": 40.0,
+      "busy_w": 120.0,
+      "cost_per_gi": 0.0,
+      "resident": [
+        "light",
+        "full"
+      ]
+    },
+    "cloud": {
+      "mips": 64000,
+      "memory_mb": 65536,
+      "idle_w": 0.0,
+      "busy_w": 0.0,
+      "cost_per_gi": 0.002,
+      "resident": [
+        "light",
+        "full"
+      ]
+    }
+  },
+  "models": [
+    {
+      "name": "light",
+      "fixed_mi": 0.205694,
+      "mi_per_flow": 0.001194,
+      "memory_mb": 5,
+      "load_s": 0.0057,
+      "recall": {
+        "ddos": 1.0,
+        "dos": 1.0,
+        "mirai": 1.0,
+        "recon": 0.8549,
+        "spoofing": 0.8503,
+        "web": 0.8708,
+        "bruteforce": 0.8565
+      },
+      "false_positive_rate": 0.2559
+    },
+    {
+      "name": "full",
+      "fixed_mi": 1.290782,
+      "mi_per_flow": 0.09873,
+      "memory_mb": 35,
+      "load_s": 0.0025,
+      "recall": {
+        "ddos": 1.0,
+        "dos": 1.0,
+        "mirai": 1.0,
+        "recon": 0.8436,
+        "spoofing": 0.8627,
+        "web": 0.9169,
+        "bruteforce": 0.9087
+      },
+      "false_positive_rate": 0.1268
+    }
+  ],
+  "traffic": {
+    "benign_flows_per_s": 900,
+    "benign_jitter": 0.3,
+    "bytes_per_flow": 156,
+    "header_bytes": 512,
+    "max_flows_per_task": 1000
+  },
+  "risk": {
+    "prefilter_noise": 0.15,
+    "critical_gateways": 0.25,
+    "critical_weight": 3.0
+  },
+  "deadlines": {
+    "high_risk_threshold": 0.5,
+    "high_s": 0.3,
+    "low_s": 2.0
+  },
+  "attacks": [
+    {
+      "class": "ddos",
+      "start_s": 15.0,
+      "duration_s": 25.0,
+      "ramp_s": 1.0,
+      "gateways": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        16,
+        17,
+        18,
+        19
+      ],
+      "flows_per_s": 14254.5
+    },
+    {
+      "class": "dos",
+      "start_s": 42.0,
+      "duration_s": 12.0,
+      "ramp_s": 1.0,
+      "gateways": [
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "flows_per_s": 11055.6
+    },
+    {
+      "class": "recon",
+      "start_s": 10.0,
+      "duration_s": 46.0,
+      "ramp_s": 0.0,
+      "gateways": [
+        1,
+        4,
+        10,
+        13,
+        17,
+        25
+      ],
+      "flows_per_s": 40.0
+    },
+    {
+      "class": "web",
+      "start_s": 10.0,
+      "duration_s": 46.0,
+      "ramp_s": 0.0,
+      "gateways": [
+        2,
+        5,
+        11,
+        14,
+        18,
+        26
+      ],
+      "flows_per_s": 15.0
+    },
+    {
+      "class": "bruteforce",
+      "start_s": 10.0,
+      "duration_s": 46.0,
+      "ramp_s": 0.0,
+      "gateways": [
+        3,
+        6,
+        12,
+        15,
+        19,
+        27
+      ],
+      "flows_per_s": 15.0
+    }
+  ],
+  "calibration": {
+    "profile": "mac",
+    "ref_mips": 8000,
+    "load_scale": 1
+  },
+  "v2": {
+    "ref_mips": 8000,
+    "extract_us_per_packet": 7.5,
+    "hash_us_per_packet": 0.05,
+    "packets_per_flow": {
+      "default": 10,
+      "ddos": 100,
+      "dos": 100,
+      "mirai": 100
+    },
+    "packet_bytes": {
+      "default": 300,
+      "benign": 400,
+      "ddos": 64,
+      "dos": 64,
+      "mirai": 80
+    },
+    "separation_error": 0.02,
+    "fractions": [
+      1.0,
+      0.5,
+      0.2,
+      0.05,
+      0.01
+    ],
+    "fa_weight": 0.05
+  }
+}
