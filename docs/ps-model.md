@@ -172,6 +172,32 @@ bound, joint optimisation has nothing left to win here. Its decision time (20 ms
 annealing plus building) fits the 100 ms epoch but is ten times that of the greedy rule.
 Whether joint placement pays off must be shown on a scenario with more headroom.
 
+## Confirmation on 20 seeds and on the large instance
+
+Rerun on an Apple M2 (MacBook Air), medium instance with seeds 2–21 and large instance
+with seeds 2–6, all held out. False alerts above the fluid bound, in points, as mean of
+paired per-seed differences ± 95 % half-width:
+
+| Instance | Load | risk-split | ps-greedy-s0.1 | qubo-ps | Misses ps-greedy-s0.1 / qubo-ps | Decision, ms (ps-greedy-s0.1 / qubo-ps) |
+|---|---|---|---|---|---|---|
+| medium, 20 seeds | x1 | +1.84 ± 0.03 | 0.00 | +0.57 ± 0.01 | 0 / 0 | 0.3 / 21.4 |
+| medium, 20 seeds | x3 | +1.45 ± 0.01 | +0.32 ± 0.01 | +0.41 ± 0.01 | 0.03 % / 0.03 % | 0.7 / 23.5 |
+| medium, 20 seeds | x10 | +0.79 ± 0.01 | +0.18 ± 0.01 | +0.23 ± 0.01 | 0.26 % / 0.16 % | 1.8 / 30.8 |
+| large, 5 seeds | x1 | +1.86 ± 0.02 | 0.00 | +0.55 ± 0.00 | 0 / 0 | 0.5 / 21.5 |
+| large, 5 seeds | x3 | +1.45 ± 0.03 | +0.33 ± 0.01 | +0.40 ± 0.01 | 0.02 % / 0.03 % | 1.3 / 26.4 |
+| large, 5 seeds | x10 | +0.79 ± 0.00 | +0.18 ± 0.00 | +0.27 ± 0.01 | 0.27 % / 0.19 % | 6.6 / 86.1 |
+
+Queue-greedy misses 5.4 % (medium x3), 5.6 % (medium x10), 4.5 % (large x3) and
+5.7 % (large x10) of deadlines; its own estimate has rank correlation 0.05 and −0.57
+(medium x3, x10) against 0.89 and 0.87 for `PSModel` on the same decisions.
+
+Reading: the five-seed results hold with intervals three to five times narrower and
+carry over to the large instance. The only significant difference between the epoch
+QUBO and `ps-greedy-s0.1` is fewer misses at x10 (−0.09 ± 0.03 points on medium), paid
+with 0.05–0.09 points of false alerts. On the large instance at x10 the QUBO's decision
+time (86 ms, of which 20 ms annealing) approaches the 100 ms epoch: building the QUBO
+from per-option `PSModel` estimates, not annealing, is what grows with the instance.
+
 ## Next
 
 - A harder, realistic scenario (feature extraction as gateway CPU work, a model ladder,

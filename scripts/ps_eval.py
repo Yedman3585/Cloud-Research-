@@ -11,8 +11,9 @@ per run and a Markdown table of means with 95 % Student-t half-widths.
         --config configs/ids-place-medium-calibrated-x10.json
 """
 import argparse
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import json
+import os
 from pathlib import Path
 import statistics
 import sys
@@ -22,6 +23,7 @@ sys.path.insert(0, str(ROOT / 'src'))
 
 T95 = {1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365, 8: 2.306, 9: 2.262}
 POLICIES = ('risk-split', 'queue-greedy', 'ps-greedy', 'ps-greedy-s0.1')
+ROWS_PER_JOB = 6  # the bound and five policies
 
 
 def run(job):
@@ -85,24 +87,61 @@ def summary(rows):
     return '\n'.join(lines)
 
 
+def _config_name(path):
+    return json.loads(Path(path).read_text(encoding='utf-8'))['name']
+
+
+def load_rows(path):
+    """Rows of complete (config, seed) runs; unreadable lines and incomplete runs are dropped."""
+    if not path.exists():
+        return []
+    rows = []
+    for line in path.read_text(encoding='utf-8', errors='replace').splitlines():
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    groups = {}
+    for r in rows:
+        groups.setdefault((r.get('config'), r.get('seed')), []).append(r)
+    return [r for g in groups.values() if len({r['policy'] for r in g}) == ROWS_PER_JOB for r in g]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--config', type=Path, action='append', required=True)
     parser.add_argument('--seeds', type=int, nargs='+', default=[2, 3, 4, 5, 6])
     parser.add_argument('--slack', type=float, default=0.1)
     parser.add_argument('--gamma', type=float, default=10.0, help='Latency weight of the epoch QUBO')
-    parser.add_argument('--workers', type=int, default=2)
+    parser.add_argument('--workers', type=int, default=2,
+                        help='Parallel runs; each starts a JVM with up to 2 GB heap')
     parser.add_argument('--output', type=Path, default=ROOT / 'artifacts/ps-eval')
+    parser.add_argument('--resume', action='store_true',
+                        help='Keep complete (config, seed) results of runs.jsonl and run only the rest')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
+    path = args.output / 'runs.jsonl'
+    rows = load_rows(path) if args.resume else []
+    done = {(r['config'], r['seed']) for r in rows}
     jobs = [(str(c), s, args.slack, args.gamma) for c in args.config for s in args.seeds]
-    rows = []
-    with ProcessPoolExecutor(args.workers) as pool, (args.output / 'runs.jsonl').open('w', encoding='utf-8') as f:
-        for result in pool.map(run, jobs):
-            for row in result:
-                rows.append(row)
-                f.write(json.dumps(row) + '\n')
-            print(f"{result[0]['config']} seed {result[0]['seed']} done", flush=True)
+    jobs = [j for j in jobs if (_config_name(j[0]), j[1]) not in done]
+    if args.resume:
+        print(f'{len(done)} runs kept, {len(jobs)} to do', flush=True)
+    with path.open('w', encoding='utf-8') as f:
+        for row in rows:
+            f.write(json.dumps(row) + '\n')
+        f.flush()
+        with ProcessPoolExecutor(args.workers) as pool:
+            futures = [pool.submit(run, job) for job in jobs]
+            for future in as_completed(futures):
+                result = future.result()
+                for row in result:
+                    rows.append(row)
+                    f.write(json.dumps(row) + '\n')
+                f.flush()
+                os.fsync(f.fileno())  # a crash loses at most the runs still in progress
+                print(f"{result[0]['config']} seed {result[0]['seed']} done", flush=True)
+    rows.sort(key=lambda r: (r['config'], r['seed']))  # stable: keeps the policy order of each run
     table = summary(rows)
     (args.output / 'summary.md').write_text(table + '\n', encoding='utf-8')
     print(table)
