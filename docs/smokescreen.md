@@ -117,6 +117,62 @@ expert rule is within 0.8 points of the bound; at x3 the best rule (`greedy-v2`)
 and the persistence forecast changes nothing. The x3 scenario is the one on which the
 epoch QUBO has to show what part of that gap is attainable under processor sharing.
 
+## Joint epoch optimisation (x3)
+
+Code: [`smokescreen_qubo.py`](../src/fogids/smokescreen_qubo.py), tests
+[`test_smokescreen_qubo.py`](../tests/test_smokescreen_qubo.py).
+
+Two epoch models, both annealed for 50 ms per epoch and checked and repaired against
+the processor-sharing estimator:
+
+- `qubo-smoke`: the qubo-ps energy extended to the new options (value of an option
+  minus the processor-sharing sum of deadline-normalised finish times). It was worse
+  than `greedy-v2` on seed 1 for every weight tried (0.43–0.56): a finish-time penalty
+  charges every job, not only those that miss, so it either drops floods or starves the
+  residual stream.
+- `ps-anneal`: the same processor-sharing rows used as **deadline constraints**. A job's
+  predicted latency is the sum over its stages of ``sum_p min(a_o, a_p)`` (the QUBO
+  row); it earns its value only if that fits its budget, and lateness is penalised
+  (kappa = 2). Jobs already committed are fixed members of the model. Parameters chosen
+  on seed 1 (kappa ∈ {2, 5}, prior of 3, 5 or 10 attack flows per task).
+
+Option values are scheduler-visible: detection probability with the attack-flow count
+estimated from the pre-filter score (at least 5 flows, since a low-rate attack hides
+below the score's noise), the value of a flood window shared among its chunks. As a
+reference, `ps-anneal-oracle-value` uses each option's exact contribution to the
+objective (ground truth), everything else unchanged.
+
+Seeds 2–6, x3, means:
+
+| Policy | Objective | Missed low-rate | Missed flood | Decision, ms |
+|---|---|---|---|---|
+| fluid bound (per gateway) | 0.047 | 0.005 | 0.105 | — |
+| `greedy-v2` | 0.386 | 0.163 | 0.708 | — |
+| `ps-anneal` | **0.366** | 0.235 | **0.550** | 56 |
+| `ps-anneal-oracle-value` | **0.290** | 0.110 | 0.555 | 57 |
+
+Paired against `greedy-v2`, `ps-anneal` is better on every seed (−2.0 points on
+average, from −0.1 to −4.3). Reading:
+
+1. **Joint placement under processor sharing works on the part it can see.** It detects
+   16 points more flood tasks than the greedy rule: the window's chunks are split
+   between gateway extraction, raw offload and dropping so that the kept ones meet
+   their deadlines.
+2. **It loses on low-rate attacks because their value is invisible.** With a pre-filter
+   score dominated by noise, a residual task with a low-rate attack looks like a benign
+   one; the annealer samples it down where the greedy rule, which always tries f = 1
+   first, keeps it whole.
+3. **With the true values the same optimiser reaches 0.290**, 9.6 points better than
+   `greedy-v2`, and misses 11 % of low-rate tasks instead of 16–24 %. The gap between
+   `ps-anneal` and its oracle (7.6 points) is what a better value estimate can win; the
+   gap between the oracle and the fluid bound is mostly the bound's optimism (it ignores
+   processor sharing: flood detection stays at 0.55 even with true values).
+
+This locates the learning problem for the method: not the load of future epochs (the
+forecast did not help), but the **value coefficients of the epoch model** — which tasks
+are worth analysing — predicted from scheduler-visible signals such as recent alerts of
+the same gateway, and trained decision-focused through the annealer.
+
 ## Next
 
 - Run the epoch QUBO (extended with fraction and extraction site, exact
