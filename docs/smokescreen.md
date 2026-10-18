@@ -95,6 +95,28 @@ Reading:
    the processor-sharing min-form of the epoch QUBO. How much of the 32 points is
    attainable is not known yet; the epoch QUBO on x3 is the test.
 
+## Held-out seeds 2–6
+
+Same configurations, seeds 2–6 (the scenario was designed on seed 1); bound per gateway
+(only the gateway's CPU and uplink constrained) for both loads; mean ± 95 % Student-t
+half-width over seeds. Missed shares are per task containing the class.
+
+| Policy | x1: objective | x1: missed low-rate / flood | x3: objective | x3: missed low-rate / flood |
+|---|---|---|---|---|
+| fluid bound (per gateway) | **0.002 ± 0.000** | 0.001 / 0.000 | **0.047 ± 0.001** | 0.005 / 0.105 |
+| `no-shed` | 0.714 ± 0.003 | 0.528 / 0.982 | — | — |
+| `uniform-shed` | 0.213 ± 0.001 | 0.289 / 0.085 | 0.648 ± 0.005 | 0.421 / 0.977 |
+| `greedy-v2` | 0.167 ± 0.012 | 0.051 / 0.326 | **0.386 ± 0.007** | 0.163 / 0.708 |
+| `stream-aware` | **0.010 ± 0.001** | 0.004 / 0.003 | 0.488 ± 0.010 | 0.208 / 0.896 |
+| `stream-aware-forecast` | 0.010 ± 0.001 | 0.004 / 0.003 | 0.489 ± 0.011 | 0.208 / 0.896 |
+| `value-greedy` | 0.402 ± 0.009 | 0.272 / 0.594 | 0.594 ± 0.013 | 0.514 / 0.712 |
+
+The seed-1 picture holds on every held-out seed, with the same ranking: at x1 the
+expert rule is within 0.8 points of the bound; at x3 the best rule (`greedy-v2`) is
+33.9 points above it, missing 16 % of low-rate attack tasks and 71 % of flood tasks,
+and the persistence forecast changes nothing. The x3 scenario is the one on which the
+epoch QUBO has to show what part of that gap is attainable under processor sharing.
+
 ## Next
 
 - Run the epoch QUBO (extended with fraction and extraction site, exact
