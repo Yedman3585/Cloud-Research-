@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT / 'src'))
 sys.path.insert(0, str(ROOT / 'tests'))
 
 from fogids.smokescreen import Engine, Estimator, generate  # noqa: E402
-from fogids.smokescreen_qubo import EpochPS, PSAnneal, QuboSmoke  # noqa: E402
+from fogids.smokescreen_qubo import AlertEvidence, AlertPSAnneal, PSAnneal, QuboSmoke, ValueGreedyAlerts  # noqa: E402
 from test_smokescreen import tiny_config  # noqa: E402
 
 
@@ -55,10 +55,24 @@ class SmokescreenQuboTests(unittest.TestCase):
 
     def test_policies_run(self):
         sc = generate(tiny_config())
-        for policy in (QuboSmoke(budget_s=0.005), PSAnneal(budget_s=0.005)):
+        for policy in (QuboSmoke(budget_s=0.005), PSAnneal(budget_s=0.005), AlertPSAnneal(budget_s=0.005),
+                       ValueGreedyAlerts()):
             r = Engine(sc).run(policy)
             self.assertLessEqual(r['objective'], 1.0 + 1e-9)
-            self.assertEqual(policy.stats['epochs'] > 0, True)
+            if hasattr(policy, 'stats'):
+                self.assertGreater(policy.stats['epochs'], 0)
+
+    def test_alerts_reveal_low_rate_attacks(self):
+        sc = generate(tiny_config())
+        engine = Engine(sc)
+        engine.run(PSAnneal(budget_s=0.005))
+        self.assertTrue(engine.alerts)
+        self.assertTrue(all(a.time_s >= 0 and a.quiet_alerts >= 0 for a in engine.alerts))
+        evidence = AlertEvidence(sc, horizon_s=10.0)
+        evidence.update(engine, sc.horizon_s)
+        # Both gateways carry a 15 flows/s web attack: the excess over the false alerts
+        # expected from benign traffic is positive.
+        self.assertGreater(max(evidence.share(g) for g in ('gw0', 'gw1')), 0.0)
 
 
 if __name__ == '__main__':

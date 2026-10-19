@@ -168,15 +168,102 @@ average, from −0.1 to −4.3). Reading:
    gap between the oracle and the fluid bound is mostly the bound's optimism (it ignores
    processor sharing: flood detection stays at 0.55 even with true values).
 
-This locates the learning problem for the method: not the load of future epochs (the
-forecast did not help), but the **value coefficients of the epoch model** — which tasks
-are worth analysing — predicted from scheduler-visible signals such as recent alerts of
-the same gateway, and trained decision-focused through the annealer.
+The gap between `ps-anneal` and its oracle is therefore informational: the scheduler
+needs a better estimate of which tasks are worth analysing. The next section shows
+that the IDS's own alerts provide it.
+
+## Alert feedback (x3)
+
+The value of a residual task depends on whether it hides a low-rate attack, which the
+pre-filter score cannot tell. An IDS does report something the scheduler can use: the
+alerts it raised in earlier windows. The simulator now samples them for every task
+analysed on time (`Engine._alert`): attack flows of the analysed share are reported in
+their group (flood or low-rate) with the model's recall; analysed benign flows raise a
+low-rate alert at the model's false-positive rate. That every benign misclassification
+of both models falls in the low-rate group is measured on CICIoT2023
+(`scripts/alert_groups.py`: 25.6 % of benign records for `light`, 12.6 % for `full`;
+flood classes are never reported as low-rate).
+
+`AlertEvidence` turns the residual-stream alerts of a gateway over the last 40 s into
+an estimated share of low-rate attack flows: (alerts − false alerts expected if all
+analysed flows were benign) / (analysed flows × mean recall). As a ranking of residual
+tasks with and without a low-rate attack (seed 1, decisions of `greedy-v2`) it reaches
+an AUC of 0.76, against 0.64 for the pre-filter score (0.65 with a 5 s history, 0.73
+with 20 s).
+
+Policies using it: `ps-anneal-alerts` (attack flows of a residual task = max(3, share ×
+flows); floor and horizon chosen on seed 1) and, as a fair baseline with the same
+information, `value-greedy-alerts`. Seeds 2–6, x3:
+
+| Policy | Objective | Missed low-rate | Missed flood |
+|---|---|---|---|
+| `greedy-v2` | 0.386 | 0.163 | 0.708 |
+| `value-greedy-alerts` | 0.321 | 0.144 | 0.575 |
+| `ps-anneal` | 0.366 | 0.235 | 0.550 |
+| **`ps-anneal-alerts`** | **0.289** | **0.086** | 0.578 |
+| `ps-anneal-oracle-value` | 0.290 | 0.110 | 0.555 |
+
+1. **Alert feedback plus joint placement gives the best policy: 0.289**, 9.7 points
+   below `greedy-v2` and 3.2 points below the greedy rule with the same alert
+   information (better on every seed, by 1.9 to 4.8 points).
+2. **The simple statistical estimate already matches the oracle values** (0.289 against
+   0.290 at the same 50 ms budget). In this scenario a learned value model has nothing
+   left to win; what remains is the optimiser and the flood capacity.
+3. **The optimiser is the lever now.** With the oracle values, three times the annealing
+   budget (150 ms) gives 0.249 on seed 1 instead of 0.288: a faster annealer reaches
+   more of it within the 100 ms epoch.
+
+## Faster annealer
+
+`fast_anneal.py` runs the same `EpochPS` model and moves on dense arrays compiled with
+numba: a move updates the latency of every job sharing a resource with the moved task
+by min(a_j, a_k), so it costs O(jobs on the resources involved). About 2.5 million
+moves per second against about 20 thousand in pure Python, i.e. ~120 000 moves in the
+50 ms budget instead of ~1 000. Dominated options (no more value, at least as much load
+on every resource) are removed before annealing (`_pareto`; the processor-sharing and
+FIFO delays are monotone in every load, so this is exact). The kernel's energy is
+checked against the Python model in the tests. Decision time per epoch, including
+building the model and the repair pass: 65–70 ms of the 100 ms epoch.
+
+Seeds 2–6, x3, Python simulator: `ps-anneal` 0.366 → 0.341, `ps-anneal-alerts` 0.289 →
+0.256, `ps-anneal-oracle-value` 0.290 → 0.230. With the oracle values the optimiser now
+leaves the alert-based policy 2.6 points behind: the value estimate matters again once
+the search is good enough.
+
+## Final comparison in iFogSim (x3)
+
+`org.fogids.IdsStaged` executes the staged tasks in iFogSim: a CPU stage on the gateway,
+then optionally a second CPU stage on the gateway or an ancestor, reached over the
+uplinks with the given bytes; work in MI and node MIPS are both scaled by 1000 (tuple
+lengths are integers) and the CPU update interval is 1 ms (deadlines of 0.3 s on
+tightly packed gateways). `smokescreen_ifogsim.simulate_ifogsim` runs a policy against
+it: the policy sees a shadow `Engine` driven by the same decisions and the alerts of
+the tasks iFogSim completed on time; metrics use iFogSim's finish times. On the test
+scenario iFogSim reproduces the Python simulator's finish times within 3 ms and the same
+objective.
+
+Seeds 2–6, x3, metrics from iFogSim (mean ± 95 % half-width; differences paired by
+seed):
+
+| Policy | Objective | Missed low-rate | Missed flood | Decision, ms |
+|---|---|---|---|---|
+| `greedy-v2` | 0.393 ± 0.008 | 0.163 | 0.724 | 41 |
+| `value-greedy-alerts` | 0.330 ± 0.017 | 0.144 | 0.597 | 70 |
+| `ps-anneal` | 0.341 ± 0.011 | 0.217 | 0.518 | 68 |
+| **`ps-anneal-alerts`** | **0.256 ± 0.008** | **0.019** | 0.596 | 67 |
+| `ps-anneal-oracle-value` (Python simulator) | 0.230 | 0.021 | 0.542 | 49 |
+
+`ps-anneal-alerts` is 13.7 points below `greedy-v2` and 7.5 points below the greedy
+rule with the same alert information, better on every seed (by at least 5.7 points),
+and misses 1.9 % of low-rate attack tasks instead of 14–16 %. The scheduler's own
+prediction (shadow) of these runs is within 0.001 of iFogSim's objective; finish times
+differ by 6 ms on average.
 
 ## Next
 
-- Run the epoch QUBO (extended with fraction and extraction site, exact
-  processor-sharing terms) on x3; a tighter bound that respects processor sharing.
-- More seeds, after the QUBO run, to quantify the gaps.
-- The oracle-future test (QUBO given the true next windows) on x3, to measure what a
-  learned forecast could add.
+- A bound that respects processor sharing, so the remaining gap (to 0.230 with oracle
+  values, to 0.047 for the fluid bound) can be stated against an attainable reference.
+- More scenarios for generality: x1 and an intermediate load, other topologies, a
+  different flood/low-rate mix.
+- Whether a learned value estimate closes the 2.6 points between the alert-based
+  estimate and the oracle values.

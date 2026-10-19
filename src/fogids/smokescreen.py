@@ -36,6 +36,7 @@ policy-side estimator, reference policies and an offline fluid lower bound.
 from dataclasses import dataclass
 import heapq
 import math
+import random
 
 from .generator import Stream, _burst_overlap, _pick, build_topology
 from .problem import Instance, Model
@@ -87,6 +88,19 @@ class Option:
 
 
 DROP = Option(None, None, 0.0, 'gw')
+
+
+@dataclass(frozen=True)
+class Alert:
+    """Alerts raised by one analysed task (scheduler-visible feedback)."""
+    time_s: float
+    gateway: str
+    stream: str
+    model: str
+    f: float
+    analysed_flows: int
+    flood_alerts: int
+    quiet_alerts: int
 
 
 class Scenario:
@@ -312,6 +326,48 @@ class Engine:
         self.loaded = {n.name: set(n.resident) for n in sc.topology.nodes}
         self.finish = {}
         self.decisions = {}
+        # Alert feedback: what the IDS reported, visible to the scheduler once raised.
+        self.alerts = []  # Alert records in order of time
+        self.emit_alerts = True
+        self._rng = random.Random(sc.config['seed'] * 7919 + 17)
+
+    def _binomial(self, n, p):
+        n = int(n)
+        if n <= 0 or p <= 0:
+            return 0
+        if n < 50:
+            return sum(1 for _ in range(n) if self._rng.random() < p)
+        mean, sd = n * p, math.sqrt(n * p * (1 - p))
+        return max(0, min(n, int(round(mean + sd * self._rng.gauss(0.0, 1.0)))))
+
+    def _alert(self, task, t):
+        if not self.emit_alerts:
+            return
+        a = self.sample_alert(task, self.decisions.get(task.id), t)
+        if a is not None:
+            self.alerts.append(a)
+
+    def sample_alert(self, task, opt, t):
+        """Sample the alerts of an analysed task. Attack flows are reported in their
+        group (flood or low-rate) with the model's recall; every false positive on a
+        benign flow is reported as a low-rate attack (measured: all benign
+        misclassifications of both models fall in the low-rate classes,
+        ``artifacts/calibration/alert-groups.json``)."""
+        if opt is None or opt.node is None or t > task.release_s + task.deadline_s + TOL:
+            return None
+        m = self.sc.model(opt.model)
+        flood = quiet = 0
+        for c, a in task.attacks:
+            k = self._binomial(a, opt.f)
+            hits = self._binomial(k, m.recall.get(c, 0.0))
+            if c in FLOOD:
+                flood += hits
+            else:
+                quiet += hits
+        benign = self._binomial(task.benign_flows, opt.f)
+        quiet += self._binomial(benign, m.false_positive_rate)
+        analysed = round(opt.f * task.n_flows)
+        return Alert(t, task.gateway, task.stream, opt.model, opt.f, analysed, flood, quiet)
 
     def _start(self, task, stages, now):
         """Run the stages from ``now``: links are reserved at once (FIFO), CPU stages
@@ -325,6 +381,7 @@ class Engine:
             t = self.link_free[link] + spec.uplink_latency_s
         if not stages:
             self.finish[task.id] = t
+            self._alert(task, t)
             return
         _, node, work = stages.pop(0)
         job = (task.id, len(stages))
@@ -367,6 +424,23 @@ class Engine:
             if t_next == math.inf:
                 return
 
+    def apply(self, now, batch, chosen):
+        """Record and start the decisions of an epoch; returns {task id: stages} as
+        executed (with the cold-start work of a model's first use on a node)."""
+        executed = {}
+        for t in batch:
+            opt = chosen.get(t.id, DROP)
+            self.decisions[t.id] = opt
+            stages = self.sc.stages(t, opt)
+            if stages and opt.model not in self.loaded[opt.node]:
+                self.loaded[opt.node].add(opt.model)
+                kind, node, work = stages[-1]
+                stages[-1] = (kind, node, work + self.sc.model(opt.model).load_s * self.sc.node(node).mips)
+            executed[t.id] = list(stages)
+            if stages:
+                self._start(t, list(stages), now)
+        return executed
+
     def run(self, policy):
         sc = self.sc
         policy.reset(sc)
@@ -381,19 +455,7 @@ class Engine:
                 batch.append(tasks[k])
                 k += 1
             if batch:
-                chosen = policy.decide(self, now, batch)
-                for t in batch:
-                    opt = chosen.get(t.id, DROP)
-                    self.decisions[t.id] = opt
-                    stages = sc.stages(t, opt)
-                    if not stages:
-                        continue
-                    # Cold start on first use of a model on a node.
-                    if opt.model not in self.loaded[opt.node]:
-                        self.loaded[opt.node].add(opt.model)
-                        kind, node, work = stages[-1]
-                        stages[-1] = (kind, node, work + sc.model(opt.model).load_s * sc.node(node).mips)
-                    self._start(t, list(stages), now)
+                self.apply(now, batch, policy.decide(self, now, batch))
             epoch += 1
             if k >= len(tasks) and now > end:
                 self._advance(math.inf)
