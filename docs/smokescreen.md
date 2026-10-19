@@ -305,11 +305,25 @@ noise: with the compiled annealer, 10 ms per epoch already reaches the result, s
 method needs about 16 ms of the 100 ms epoch. What remains to the oracle (2.6 points)
 is on flood tasks (0.597 against 0.540 missed), not low-rate ones.
 
+## A processor-sharing window bound
+
+`smokescreen_bound.ps_window_bound` relaxes the problem per gateway window: the chosen
+options' first stages share the gateway under processor sharing with only the other
+tasks of their window (jobs of earlier windows, other gateways and downstream contention
+left out), which gives linear big-M constraints sum_j min(a_i, a_j) x_j <= budget_i; each
+window is a small mixed-integer program solved with HiGHS (dual bound when the 5 s limit
+is hit). It is a valid lower bound, but a weak one: on x3, seed 2, it gives 0.006 (1 643
+of 1 888 windows optimal), below the fluid bound (0.048). The per-window plans it finds
+detect 90 % of flood tasks, so processor sharing **within** a window is not what limits
+flood detection; the loss comes from work carried across windows (low-risk tasks with
+2 s deadlines overlapping the next window's flood) and from deciding one epoch at a
+time. The tightest valid bound remains the fluid one (0.047); the best attainable
+reference is the online policy with oracle task values (0.229).
+
 ## Next
 
-- A bound that respects processor sharing, so the remaining gap (to 0.230 with oracle
-  values, to 0.047 for the fluid bound) can be stated against an attainable reference.
-- More scenarios for generality: x1 and an intermediate load, other topologies, a
-  different flood/low-rate mix.
+- A bound that carries work across windows (the per-window processor-sharing bound
+  shows that within-window sharing is not the binding effect).
+- Charged decision time in iFogSim (the method needs about 16 ms of the epoch).
 - Whether a learned value estimate closes the 2.6 points between the alert-based
   estimate and the oracle values.

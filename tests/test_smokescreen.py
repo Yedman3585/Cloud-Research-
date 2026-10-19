@@ -62,6 +62,15 @@ class SmokescreenTests(unittest.TestCase):
             r = Engine(sc).run(cls())
             self.assertLessEqual(bound['objective'], r['objective'] + 1e-9, name)
 
+    def test_processor_sharing_bound_is_below_every_policy(self):
+        from fogids.smokescreen_bound import ps_window_bound
+        sc = generate(tiny_config())
+        bound = ps_window_bound(sc, time_limit_s=5.0)
+        self.assertEqual(bound['not_optimal'], 0)
+        for name, cls in POLICIES.items():
+            r = Engine(sc).run(cls())
+            self.assertLessEqual(bound['objective'], r['objective'] + 1e-9, name)
+
 
 if __name__ == '__main__':
     unittest.main()
