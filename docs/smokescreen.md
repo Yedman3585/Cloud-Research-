@@ -259,6 +259,52 @@ and misses 1.9 % of low-rate attack tasks instead of 14–16 %. The scheduler's 
 prediction (shadow) of these runs is within 0.001 of iFogSim's objective; finish times
 differ by 6 ms on average.
 
+## Robustness and ablations (Python simulator, seeds 2–6)
+
+`scripts/robustness.py` changes one parameter of the x3 scenario at a time, or one
+component of `ps-anneal-alerts`; 165 runs. Objective, mean ± 95 % half-width; the last
+column is paired by seed.
+
+| Variant | `greedy-v2` | `value-greedy-alerts` | `ps-anneal-alerts` | `ps-anneal-alerts` − `value-greedy-alerts` |
+|---|---|---|---|---|
+| x3 (base) | 0.386 ± 0.007 | 0.321 ± 0.013 | **0.255 ± 0.008** | −0.066 ± 0.019 |
+| load x2 | 0.309 ± 0.013 | 0.252 ± 0.007 | **0.149 ± 0.010** | −0.103 ± 0.010 |
+| load x5 | 0.456 ± 0.015 | 0.412 ± 0.010 | **0.379 ± 0.007** | −0.033 ± 0.009 |
+| extraction 1 µs/packet | 0.408 ± 0.016 | 0.323 ± 0.019 | **0.088 ± 0.010** | −0.235 ± 0.019 |
+| extraction 3 µs/packet | 0.411 ± 0.012 | 0.347 ± 0.010 | **0.154 ± 0.009** | −0.193 ± 0.006 |
+| separation error 0 % | 0.353 ± 0.005 | 0.285 ± 0.014 | **0.251 ± 0.008** | −0.034 ± 0.015 |
+| separation error 5 % | 0.497 ± 0.015 | 0.421 ± 0.016 | **0.350 ± 0.010** | −0.071 ± 0.016 |
+| large topology (8 × 16 gateways) | 0.378 ± 0.006 | 0.315 ± 0.005 | **0.260 ± 0.003** | −0.055 ± 0.005 |
+
+`ps-anneal-alerts` is the best policy in every variant and on every seed; its margin
+over `greedy-v2` ranges from 5.0 points (worst seed, x5) to 32 points (1 µs per packet).
+The margin is largest when extraction is cheaper (a compiled extractor): the greedy
+rules then spend the freed CPU on flood chunks first, while the epoch model puts it on
+the residual stream. It shrinks at x5, where every policy is capacity-bound, and when
+the streams separate perfectly (the low-rate attacks are then easy for everyone).
+
+Ablations (x3):
+
+| Change | Objective | Missed low-rate | Missed flood | Decision, ms |
+|---|---|---|---|---|
+| none | 0.255 ± 0.008 | 0.018 | 0.597 | 58 |
+| no alerts (`ps-anneal`) | 0.341 ± 0.010 | 0.216 | 0.519 | 60 |
+| no dominance pruning | 0.256 ± 0.008 | 0.018 | 0.598 | 55 |
+| no repair | 0.256 ± 0.008 | 0.018 | 0.599 | 58 |
+| annealing budget 10 ms | 0.258 ± 0.008 | 0.022 | 0.597 | 16 |
+| annealing budget 25 ms | 0.257 ± 0.007 | 0.021 | 0.597 | 32 |
+| annealing budget 100 ms | 0.255 ± 0.008 | 0.016 | 0.599 | 111 |
+| alert window 10 s | 0.255 ± 0.009 | 0.018 | 0.596 | 58 |
+| alert window 20 s | 0.257 ± 0.007 | 0.019 | 0.599 | 58 |
+| oracle values | 0.229 ± 0.005 | 0.018 | 0.540 | 42 |
+
+The two components that matter are the alert-based values (8.6 points) and the
+deadline-exact epoch model (the step from `value-greedy-alerts`, 6.6 points). Pruning,
+repair, the alert window and the annealing budget change less than the seed-to-seed
+noise: with the compiled annealer, 10 ms per epoch already reaches the result, so the
+method needs about 16 ms of the 100 ms epoch. What remains to the oracle (2.6 points)
+is on flood tasks (0.597 against 0.540 missed), not low-rate ones.
+
 ## Next
 
 - A bound that respects processor sharing, so the remaining gap (to 0.230 with oracle
