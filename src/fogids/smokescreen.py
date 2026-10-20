@@ -329,6 +329,7 @@ class Engine:
         # Alert feedback: what the IDS reported, visible to the scheduler once raised.
         self.alerts = []  # Alert records in order of time
         self.emit_alerts = True
+        self.decision_delay = 0.0  # expected time between an epoch and its decisions taking effect
         self._rng = random.Random(sc.config['seed'] * 7919 + 17)
 
     def _binomial(self, n, p):
@@ -471,6 +472,9 @@ class Estimator:
 
     def __init__(self, engine, now):
         self.e, self.now, self.sc = engine, now, engine.sc
+        # Decisions take effect after the decision time when it is charged; new work
+        # is predicted to start then.
+        self.delay = getattr(engine, 'decision_delay', 0.0)
         self.active = {n: dict(j) for n, j in engine.active.items()}
         self.pending = {n: [] for n in engine.active}
         self.link_free = dict(engine.link_free)
@@ -502,7 +506,7 @@ class Estimator:
 
     def copy(self):
         other = Estimator.__new__(Estimator)
-        other.e, other.now, other.sc = self.e, self.now, self.sc
+        other.e, other.now, other.sc, other.delay = self.e, self.now, self.sc, self.delay
         other.active = self.active  # never modified after construction
         other.pending = {n: list(v) for n, v in self.pending.items()}
         other.link_free, other.deadline = dict(self.link_free), dict(self.deadline)
@@ -517,7 +521,7 @@ class Estimator:
         stages = self.sc.stages(task, opt)
         if not stages:
             return None, 0
-        t, broken, link_free = self.now, 0, dict(self.link_free)
+        t, broken, link_free = self.now + self.delay, 0, dict(self.link_free)
         for i, (kind, res, amount) in enumerate(stages):
             if kind == 'link':
                 spec = self.sc.node(res)
@@ -537,7 +541,7 @@ class Estimator:
 
     def commit(self, task, opt):
         stages = self.sc.stages(task, opt)
-        t = self.now
+        t = self.now + self.delay
         for i, (kind, res, amount) in enumerate(stages):
             if kind == 'link':
                 spec = self.sc.node(res)

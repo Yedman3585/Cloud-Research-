@@ -388,10 +388,10 @@ class PSAnneal(QuboSmoke):
     name = 'ps-anneal'
 
     def __init__(self, kappa=2.0, fa_weight=1e-4, slack=0.1, budget_s=0.05, seed=0, min_attack=5.0,
-                 flood_share=True, oracle_value=False, prune=True, t0=0.5, t1=0.005, fast=True):
+                 flood_share=True, oracle_value=False, prune=True, t0=0.5, t1=0.005, fast=True, repair=True):
         super().__init__(gamma=0.0, fa_weight=fa_weight, slack=slack, budget_s=budget_s, seed=seed,
                          min_attack=min_attack)
-        self.prune, self.t0, self.t1, self.fast = prune, t0, t1, fast
+        self.prune, self.t0, self.t1, self.fast, self.repair = prune, t0, t1, fast, repair
         self.kappa, self.flood_share, self.oracle_value = kappa, flood_share, oracle_value
         if oracle_value:
             self.name = 'ps-anneal-oracle-value'
@@ -455,7 +455,7 @@ class PSAnneal(QuboSmoke):
             options.append(row_o)
             values.append(row_v)
             stages.append(row_s)
-            budget = (t.release_s + t.deadline_s * (1 - self.slack)) - now
+            budget = (t.release_s + t.deadline_s * (1 - self.slack)) - now - est.delay
             budgets.append(budget)
             horizons.append(t.deadline_s)
         return EpochPS(options, values, stages, budgets, horizons, fixed, self.kappa)
@@ -478,8 +478,10 @@ class PSAnneal(QuboSmoke):
         out = {}
         for i, t in enumerate(tasks):
             order = [choice[i]] + sorted(range(len(m.options[i])), key=lambda k: -m.values[i][k])
-            chosen = DROP
-            for k in order:
+            if not self.repair:
+                order = order[:1]
+            chosen = DROP if self.repair else m.options[i][choice[i]]
+            for k in (order if self.repair else []):
                 o = m.options[i][k]
                 if o.node is None:
                     break

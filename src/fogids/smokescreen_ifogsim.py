@@ -47,7 +47,12 @@ def _assignment(task, stages):
     return [task.id, gw_mi, node, size, mi]
 
 
-def simulate_ifogsim(sc, policy, drain_s=10.0, timeout_s=7200, log_path=None):
+def simulate_ifogsim(sc, policy, decision_time='none', drain_s=10.0, timeout_s=7200, log_path=None):
+    """``decision_time``: 'none' (decisions take effect at the epoch), 'measured' (the
+    policy's wall-clock decision time is charged to the simulated clock) or a number of
+    seconds charged at every epoch."""
+    if decision_time not in ('none', 'measured') and not isinstance(decision_time, (int, float)):
+        raise ValueError("decision_time must be 'none', 'measured' or seconds")
     classpath = compile_staged()
     shadow = Engine(sc)
     shadow.emit_alerts = False  # alerts come from iFogSim's completions
@@ -78,11 +83,20 @@ def simulate_ifogsim(sc, policy, drain_s=10.0, timeout_s=7200, log_path=None):
                     if a is not None:
                         shadow.alerts.append(a)
                 batch = [tasks[i] for i in message['tasks']]
+                # The policy plans with the delay it expects: the charged constant, or the
+                # mean of its own decision times so far.
+                if decision_time == 'measured':
+                    shadow.decision_delay = sum(decision_s) / len(decision_s) if decision_s else 0.0
+                elif decision_time != 'none':
+                    shadow.decision_delay = float(decision_time)
                 t0 = time.perf_counter()
                 chosen = policy.decide(shadow, now, batch)
-                decision_s.append(time.perf_counter() - t0)
-                executed = shadow.apply(now, batch, chosen)
-                reply = {'assignments': [_assignment(t, executed[t.id]) for t in batch], 'delay_s': 0.0}
+                elapsed = time.perf_counter() - t0
+                decision_s.append(elapsed)
+                delay = 0.0 if decision_time == 'none' else elapsed if decision_time == 'measured' else float(decision_time)
+                # The shadow applies the decisions when iFogSim does: after the charged delay.
+                executed = shadow.apply(now + delay, batch, chosen)
+                reply = {'assignments': [_assignment(t, executed[t.id]) for t in batch], 'delay_s': delay}
                 process.stdin.write(json.dumps(reply) + '\n')
                 process.stdin.flush()
             process.stdin.close()
@@ -104,4 +118,6 @@ def simulate_ifogsim(sc, policy, drain_s=10.0, timeout_s=7200, log_path=None):
     metrics['finish_error_mean_s'] = sum(errors) / len(errors) if errors else None
     metrics['finish_error_max_s'] = max(errors) if errors else None
     metrics['decision_mean_s'] = sum(decision_s) / len(decision_s) if decision_s else 0.0
+    metrics['decision_p95_s'] = sorted(decision_s)[int(0.95 * (len(decision_s) - 1))] if decision_s else 0.0
+    metrics['decision_max_s'] = max(decision_s) if decision_s else 0.0
     return metrics
