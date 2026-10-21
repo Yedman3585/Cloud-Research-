@@ -376,6 +376,53 @@ is knowing that the flood stream can be sampled to 1 %, which that rule is told.
 (every epoch model with estimated and oracle option values, task features and
 outcomes; not in git, about 90 MB).
 
+## Baselines from the literature (Python simulator, seeds 2–6)
+
+Code: [`baselines.py`](../src/fogids/baselines.py), tuning
+[`scripts/tune_satoca.py`](../scripts/tune_satoca.py).
+
+- **`sa-toca`** (after Sudyana et al., IEEE TSC 2025): per traffic class (stream ×
+  deadline class) a fixed split over five routes (gateway, fog with features, fog with
+  sampled raw packets, cloud, drop), one model and one sampling fraction, routed by
+  weighted round robin with no run-time feedback. The 4 × 7 parameters are tuned
+  offline by simulated annealing (600 iterations) on x3, training seed 7, with **our
+  objective computed from ground truth** — more favourable to the baseline than the
+  original cost model. Tuned: flood traffic sampled at 1 % with the light model, 60 % of
+  short-deadline flood chunks dropped, much of it sent as raw packets to the fog;
+  residual traffic analysed by the full model mostly at the fog (5–50 % sampling).
+- **`fog-qiea`** (FOG-QIEA style): per epoch, a quantum-inspired evolutionary algorithm
+  (probability vectors over each task's options, rotated toward the best observed
+  solution) with the same option values and deadline rule as `ps-anneal-alerts` but the
+  usual additive contention model; same 50 ms budget and repair. `qiea-ps` is the same
+  algorithm on our processor-sharing model (optimizer swap only).
+
+| Variant | `greedy-v2` | `sa-toca` (tuned at x3) | `fog-qiea` | `qiea-ps` | `ps-anneal-alerts` |
+|---|---|---|---|---|---|
+| x3 (tuning condition) | 0.386 | **0.252** | 0.440 | 0.439 | 0.255 |
+| load x2 | 0.309 | 0.226 | — | — | **0.149** |
+| load x5 | 0.456 | **0.365** | — | — | 0.379 |
+| extraction 1 µs/packet | 0.408 | 0.243 | — | — | **0.088** |
+| separation error 5 % | 0.497 | **0.342** | — | — | 0.350 |
+| large topology | 0.378 | **0.250** | — | — | 0.260 |
+
+1. **A static split tuned offline with ground truth on the deployment condition is as
+   good as the online method there** (x3: 0.252 against 0.255, a tie within noise; it
+   detects slightly more flood tasks and raises half the false alerts) and slightly
+   better under the conditions closest to it (x5, 5 % separation error, larger
+   topology: 0.8–1.4 points).
+2. **It does not adapt.** Where the condition moves away from the tuning point it
+   keeps the x3 shares: at x2 it is 7.7 points worse than the online method, and with a
+   compiled extractor (1 µs/packet) 15.5 points worse. The online method needs no
+   labels and no retuning; the static split needs ground truth and an offline search
+   per condition.
+3. **Generic metaheuristics are not enough.** The QIEA, with the same values and budget,
+   reaches 0.44 with either contention model: in Python it evaluates a few hundred whole
+   solutions per epoch, while the annealer makes about 120 000 incremental moves.
+
+Open: tune `sa-toca` per condition (an upper reference for static splits), and a
+non-stationary scenario (load or attack mix changing within a run), where only an online
+method can follow the change.
+
 ## Next
 
 - A bound that carries work across windows (the per-window processor-sharing bound

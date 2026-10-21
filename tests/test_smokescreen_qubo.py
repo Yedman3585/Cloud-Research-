@@ -74,6 +74,20 @@ class SmokescreenQuboTests(unittest.TestCase):
         # expected from benign traffic is positive.
         self.assertGreater(max(evidence.share(g) for g in ('gw0', 'gw1')), 0.0)
 
+    def test_literature_baselines_run(self):
+        from fogids.baselines import QIEAPolicy, SplitPolicy, default_params
+        sc = generate(tiny_config())
+        params = default_params(sc)
+        params['flood/high']['shares'] = {'local': 5, 'fog': 0, 'fog-raw': 3, 'cloud': 0, 'drop': 2}
+        params['flood/high']['f'] = 0.01
+        for policy in (SplitPolicy(params), QIEAPolicy(budget_s=0.005), QIEAPolicy(budget_s=0.005, model='ps')):
+            r = Engine(sc).run(policy)
+            self.assertLessEqual(r['objective'], 1.0 + 1e-9)
+        split = SplitPolicy(params)
+        split.reset(sc)
+        routes = [split.route('gw0', 'flood/high') for _ in range(10)]
+        self.assertEqual(sorted(routes), sorted(['local'] * 5 + ['fog-raw'] * 3 + ['drop'] * 2))
+
 
 if __name__ == '__main__':
     unittest.main()

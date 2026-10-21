@@ -48,6 +48,25 @@ def _large(c):
     c['name'] = 'smokescreen-x3-large'
 
 
+def _drift(c):
+    """Non-stationary x3: a moderate DDoS (x1.5) on one set of gateways for 5-25 s, then
+    a heavy DDoS and DoS (x5) on other gateways for 30-55 s; low-rate attacks run
+    throughout on the same gateways as in x3. One static split cannot fit both phases."""
+    x1 = json.loads(X1.read_text(encoding='utf-8'))
+    rate = {a['class']: a['flows_per_s'] for a in x1['attacks']}
+    flood = [
+        {'class': 'ddos', 'start_s': 5.0, 'duration_s': 20.0, 'ramp_s': 1.0,
+         'gateways': [0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19], 'flows_per_s': round(rate['ddos'] * 1.5, 1)},
+        {'class': 'ddos', 'start_s': 30.0, 'duration_s': 25.0, 'ramp_s': 1.0,
+         'gateways': [8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27], 'flows_per_s': round(rate['ddos'] * 5, 1)},
+        {'class': 'dos', 'start_s': 30.0, 'duration_s': 25.0, 'ramp_s': 1.0,
+         'gateways': [20, 21, 22, 23], 'flows_per_s': round(rate['dos'] * 5, 1)},
+    ]
+    quiet = [dict(a, start_s=5.0, duration_s=52.0) for a in c['attacks'] if a['class'] not in ('ddos', 'dos')]
+    c['attacks'] = flood + quiet
+    c['name'] = 'smokescreen-drift'
+
+
 VARIANTS = {
     'base': lambda c: None,
     'load-x1': lambda c: _scale(c, 1),
@@ -61,6 +80,7 @@ VARIANTS = {
     'separation-0': lambda c: c['v2'].update(separation_error=0.0),
     'separation-5': lambda c: c['v2'].update(separation_error=0.05),
     'large': _large,
+    'drift': _drift,
 }
 
 ABLATIONS = {
@@ -87,6 +107,11 @@ def make_policy(name, kw):
         return PSAnneal(oracle_value=True, **kw)
     if name == 'value-greedy-alerts':
         return ValueGreedyAlerts(**kw)
+    if name in ('sa-toca', 'fog-qiea', 'qiea-ps'):
+        from fogids.baselines import QIEAPolicy, SplitPolicy
+        if name == 'sa-toca':
+            return SplitPolicy(path=ROOT / 'configs/sa-toca-ids-place-smokescreen-x3.json')
+        return QIEAPolicy(model='ps' if name == 'qiea-ps' else 'additive', **kw)
     return RULES[name](**kw)
 
 
@@ -98,7 +123,11 @@ def run(job):
     VARIANTS[variant](c)
     c['seed'] = seed
     sc = generate(c)
-    p = make_policy(policy, kw)
+    if policy == 'sa-toca-own':  # tuned offline on this variant (scripts/tune_satoca.py --variant)
+        from fogids.baselines import SplitPolicy
+        p = SplitPolicy(path=ROOT / f'configs/sa-toca-x3-{variant}.json')
+    else:
+        p = make_policy(policy, kw)
     started = time.perf_counter()
     r = Engine(sc).run(p)
     stats = getattr(p, 'stats', {})

@@ -27,6 +27,9 @@ from fogids.generator import load_config  # noqa: E402
 from fogids.smokescreen import POLICIES, generate  # noqa: E402
 from fogids.smokescreen_ifogsim import simulate_ifogsim  # noqa: E402
 from fogids.smokescreen_qubo import AlertPSAnneal, PSAnneal, ValueGreedyAlerts  # noqa: E402
+from fogids.baselines import QIEAPolicy, SplitPolicy  # noqa: E402
+
+SATOCA = ROOT / 'configs/sa-toca-ids-place-smokescreen-x3.json'
 
 FACTORIES = {
     **{name: cls for name, cls in POLICIES.items()},
@@ -35,6 +38,9 @@ FACTORIES = {
     'ps-anneal-alerts-10ms': lambda: AlertPSAnneal(floor=3.0, budget_s=0.01),
     'ps-anneal-oracle-value': lambda: PSAnneal(oracle_value=True),
     'value-greedy-alerts': lambda: ValueGreedyAlerts(),
+    'sa-toca': lambda: SplitPolicy(path=SATOCA),
+    'fog-qiea': lambda: QIEAPolicy(),
+    'qiea-ps': lambda: QIEAPolicy(model='ps'),
 }
 
 
@@ -51,7 +57,11 @@ def run(job):
     config['seed'] = seed
     sc = generate(config)
     started = time.perf_counter()
-    r = simulate_ifogsim(sc, FACTORIES[name](), decision_time=decision_time)
+    if name == 'sa-toca-own':  # tuned offline on this variant
+        policy = SplitPolicy(path=ROOT / f'configs/sa-toca-x3-{variant}.json')
+    else:
+        policy = FACTORIES[name]()
+    r = simulate_ifogsim(sc, policy, decision_time=decision_time)
     return {'config': config['name'], 'variant': variant, 'decision_time': str(decision_time), 'seed': seed,
             'policy': name, 'seconds': time.perf_counter() - started,
             **{k: v for k, v in r.items() if not isinstance(v, dict)},
