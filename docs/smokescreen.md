@@ -320,6 +320,62 @@ flood detection; the loss comes from work carried across windows (low-risk tasks
 time. The tightest valid bound remains the fluid one (0.047); the best attainable
 reference is the online policy with oracle task values (0.229).
 
+## Overnight runs: 20 seeds, decision time, load curve, robustness in iFogSim
+
+All on an Apple M2 (`scripts/night_runs.sh`, 21 October 2026). Mean ± 95 % half-width;
+differences paired by seed.
+
+**Main comparison, iFogSim, x3, seeds 2–21** (final table for the paper):
+
+| Policy | Objective | Missed low-rate | Missed flood | Decision, ms (mean) |
+|---|---|---|---|---|
+| `greedy-v2` | 0.387 ± 0.004 | 0.159 | 0.714 | 19 |
+| `value-greedy-alerts` | 0.325 ± 0.005 | 0.138 | 0.591 | 33 |
+| `ps-anneal` | 0.342 ± 0.003 | 0.216 | 0.521 | 60 |
+| **`ps-anneal-alerts`** | **0.255 ± 0.003** | **0.017** | 0.597 | 58 |
+| `ps-anneal-oracle-value` (Python simulator) | 0.229 ± 0.002 | 0.019 | 0.540 | — |
+
+`ps-anneal-alerts` − `greedy-v2` = −0.132 ± 0.005 (every seed at least −0.110);
+− `value-greedy-alerts` = −0.070 ± 0.005 (at least −0.057); − `ps-anneal` = −0.087 ±
+0.002. The gap to the oracle values is 0.026 ± 0.001. The scheduler's own model predicts
+iFogSim's objective within 0.0002 for the annealing policies (0.006–0.010 for the
+greedy ones, whose estimator is coarser).
+
+**Decision time charged to the simulated clock** (iFogSim, x3, seeds 2–6; the policies
+plan with the delay they expect):
+
+| Policy | none | fixed 16 ms | fixed 50 ms | measured | decision mean / p95, ms |
+|---|---|---|---|---|---|
+| `greedy-v2` | 0.387 | 0.383 | 0.391 | 0.413 | 17 / 67 |
+| `value-greedy-alerts` | 0.325 | 0.336 | 0.358 | 0.411 | 29 / 107 |
+| `ps-anneal-alerts` (50 ms budget) | 0.255 | 0.267 | 0.292 | 0.300 | 58 / 84 |
+| `ps-anneal-alerts` (10 ms budget) | — | — | — | **0.270** | 16 / 27 |
+
+With its decision time charged, the method keeps a large lead: 0.270 (10 ms annealing
+budget) against 0.413 for `greedy-v2` and 0.411 for `value-greedy-alerts`, whose Python
+decisions take up to 107 ms at the 95th percentile. A 10 ms budget is the better
+operating point online: it loses nothing in quality without charged time (ablations) and
+its decisions stay below 27 ms in 95 % of epochs.
+
+**Load curve** (Python simulator, seeds 2–6): `ps-anneal-alerts` is the best of the three
+policies at every load from x1 to x5; its margin over `greedy-v2` is 8–15 points from x1
+to x3 and narrows to 8 points at x5, where every policy is capacity-bound (figure
+`docs/figures/robustness.png`). At x1 the expert anti-smokescreen rule (`stream-aware`,
+not in this sweep) remains better (0.010, section Screening): at low load the hard part
+is knowing that the flood stream can be sampled to 1 %, which that rule is told.
+
+**Robustness in iFogSim** (seeds 2–6): the Python results carry over.
+
+| Variant | `greedy-v2` | `value-greedy-alerts` | `ps-anneal` | `ps-anneal-alerts` | ours − `greedy-v2` (worst seed) |
+|---|---|---|---|---|---|
+| extraction 1 µs/packet | 0.415 | 0.335 | 0.192 | **0.088** | −0.327 (−0.307) |
+| separation error 5 % | 0.504 | 0.431 | 0.422 | **0.350** | −0.153 (−0.135) |
+| large topology (128 gateways) | 0.384 | 0.325 | 0.354 | **0.259** | −0.124 (−0.118) |
+
+**Training data** for a learned value estimate: seeds 7–26 in `artifacts/value-data/`
+(every epoch model with estimated and oracle option values, task features and
+outcomes; not in git, about 90 MB).
+
 ## Next
 
 - A bound that carries work across windows (the per-window processor-sharing bound

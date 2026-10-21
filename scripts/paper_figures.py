@@ -77,7 +77,9 @@ def main_results(plt):
 def robustness(plt):
     rows = [r for r in load(ROOT / 'artifacts/robustness/runs.jsonl') if r['group'] == 'variant']
     panels = [
-        ('Traffic load', [('load-x2', 2), ('base', 3), ('load-x5', 5)], 'load (x base)', lambda v: f'x{v}'),
+        ('Traffic load', [(v, x) for v, x in (('load-x1', 1), ('load-x1.5', 1.5), ('load-x2', 2),
+                                              ('load-x2.5', 2.5), ('base', 3), ('load-x4', 4), ('load-x5', 5))
+                          if any(r['variant'] == v for r in rows)], 'load (x base)', lambda v: f'x{v:g}'),
         ('Feature-extraction cost', [('extract-1us', 1.0), ('extract-3us', 3.0), ('base', 7.5)],
          'µs per packet (M2)', lambda v: f'{v:g}'),
         ('Stream-separation error', [('separation-0', 0), ('base', 2), ('separation-5', 5)],
@@ -93,8 +95,9 @@ def robustness(plt):
             ax.errorbar(xs, [m for m, _ in stats], yerr=[h for _, h in stats], color=COLOR[p],
                         marker=MARKER[p], markersize=5, linewidth=2, capsize=2.5, elinewidth=0.8,
                         markeredgecolor='white', markeredgewidth=0.8, zorder=3)
-        ax.set_xticks(xs)
-        ax.set_xticklabels([fmt(x) for x in xs], fontsize=8, color=INK2)
+        ticks = [x for x in xs if float(x).is_integer()] if len(xs) > 4 else xs
+        ax.set_xticks(ticks)
+        ax.set_xticklabels([fmt(x) for x in ticks], fontsize=8, color=INK2)
         ax.set_xlabel(xlabel, fontsize=8, color=INK2)
         ax.set_title(title, fontsize=8.5, color=INK, loc='left')
         style(ax)
