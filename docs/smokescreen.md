@@ -419,14 +419,46 @@ Code: [`baselines.py`](../src/fogids/baselines.py), tuning
    reaches 0.44 with either contention model: in Python it evaluates a few hundred whole
    solutions per epoch, while the annealer makes about 120 000 incremental moves.
 
-Open: tune `sa-toca` per condition (an upper reference for static splits), and a
-non-stationary scenario (load or attack mix changing within a run), where only an online
-method can follow the change.
+### Per-condition tuning, 20 seeds in iFogSim and a non-stationary scenario
+
+`sa-toca-own` is the static split re-tuned on the evaluated condition itself (same
+search, training seed 7, ground-truth objective), an upper reference for static splits.
+The **drift** scenario changes the load within a run: DDoS x1.5 on gateways 0–7 and
+16–19 during 5–25 s, then DDoS x5 on gateways 8–15 and 24–27 and DoS x5 on gateways
+20–23 during 30–55 s, with low-rate attacks throughout 5–57 s.
+
+| Condition | `greedy-v2` | `sa-toca` (tuned at x3) | `sa-toca-own` | `ps-anneal-alerts` |
+|---|---|---|---|---|
+| x3, iFogSim, 20 seeds | 0.387 ± 0.004 | **0.251 ± 0.002** | — | 0.255 ± 0.003 |
+| load x2, Python | 0.309 | 0.226 | 0.159 ± 0.008 | **0.149 ± 0.010** |
+| extraction 1 µs, Python | 0.408 | 0.243 | 0.140 ± 0.013 | **0.088 ± 0.010** |
+| drift, iFogSim, seeds 2–6 | 0.467 ± 0.019 | 0.356 ± 0.011 | **0.329 ± 0.005** | 0.342 ± 0.007 |
+
+(`fog-qiea` in iFogSim, 20 seeds: 0.438 ± 0.004. Value-greedy with alerts on drift:
+0.405 ± 0.011. Python and iFogSim agree on drift to within 0.007 for every policy.)
+
+1. **x3 over 20 seeds:** the split tuned on this condition is ahead by 0.36 ± 0.18 points
+   (paired). It misses more low-rate attack tasks (2.7 % against 1.7 %) and fewer flood
+   tasks (58 % against 60 %). It also has no decision time; with charged decision time
+   the online method reaches 0.270 (10 ms budget).
+2. **Re-tuning per condition does not make the static split the better method** where
+   the condition differs in kind: at x2 the online method is still 1.0 points better
+   than the re-tuned split, with a 1 µs extractor 5.2 points better. The online method
+   uses the cheaper extraction at run time; a fixed share per class can only partly do so.
+3. **Drift:** the split tuned at x3 is 1.4 ± 1.0 points behind the online method (paired).
+   A split re-tuned on the drift run itself, i.e. with the whole attack schedule and the
+   labels known in advance, is 1.3 ± 0.6 points ahead. This is the cost of reacting to
+   alerts instead of knowing the future; the online method needs neither labels nor the
+   schedule.
+
+Summary for the paper: without labels or retuning the online method matches a static
+split tuned offline with ground truth on the deployment condition, beats it once the
+condition shifts, and stays within about one point of a split tuned with full knowledge of
+a non-stationary attack.
 
 ## Next
 
 - A bound that carries work across windows (the per-window processor-sharing bound
   shows that within-window sharing is not the binding effect).
-- Charged decision time in iFogSim (the method needs about 16 ms of the epoch).
 - Whether a learned value estimate closes the 2.6 points between the alert-based
   estimate and the oracle values.
