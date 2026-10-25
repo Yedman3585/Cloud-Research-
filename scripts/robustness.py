@@ -107,6 +107,12 @@ def make_policy(name, kw):
         return PSAnneal(oracle_value=True, **kw)
     if name == 'value-greedy-alerts':
         return ValueGreedyAlerts(**kw)
+    if name == 'ps-anneal-true-a':
+        from fogids.learned import TrueAttackPSAnneal
+        return TrueAttackPSAnneal(floor=3.0, **kw)
+    if name == 'ps-anneal-learned':  # trained on every condition (scripts/train_values.py)
+        from fogids.learned import LearnedPSAnneal
+        return LearnedPSAnneal(ROOT / 'artifacts/models/value-gbm.pkl', **kw)
     if name in ('sa-toca', 'fog-qiea', 'qiea-ps'):
         from fogids.baselines import QIEAPolicy, SplitPolicy
         if name == 'sa-toca':
@@ -126,6 +132,9 @@ def run(job):
     if policy == 'sa-toca-own':  # tuned offline on this variant (scripts/tune_satoca.py --variant)
         from fogids.baselines import SplitPolicy
         p = SplitPolicy(path=ROOT / f'configs/sa-toca-x3-{variant}.json')
+    elif policy == 'ps-anneal-learned-loo':  # trained without this condition
+        from fogids.learned import LearnedPSAnneal
+        p = LearnedPSAnneal(ROOT / f'artifacts/models/value-gbm-without-{variant}.pkl', **kw)
     else:
         p = make_policy(policy, kw)
     started = time.perf_counter()
