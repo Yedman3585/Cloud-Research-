@@ -8,8 +8,12 @@ gateway's alert evidence over 10, 20 and 40 s). A second file holds every task's
 outcome. Seeds default to 7-26, disjoint from the evaluation seeds 2-6.
 
     python scripts/collect_values.py --seeds 7 8 9 --workers 2
+    python scripts/collect_values.py --variant load-x5
 
-Output: artifacts/value-data/seed-<k>.epochs.jsonl.gz and seed-<k>.tasks.jsonl.gz.
+``--variant`` applies one of the parameter changes of ``scripts/robustness.py`` to the
+configuration (default: none, x3 as configured).
+
+Output: artifacts/value-data[/<variant>]/seed-<k>.epochs.jsonl.gz and seed-<k>.tasks.jsonl.gz.
 """
 import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -24,7 +28,7 @@ sys.path.insert(0, str(ROOT / 'src'))
 
 
 def collect(job):
-    config_path, seed, out = job
+    config_path, variant, seed, out = job
     from fogids.generator import load_config
     from fogids.smokescreen import Engine, generate
     from fogids.smokescreen_qubo import AlertEvidence, AlertPSAnneal
@@ -80,6 +84,10 @@ def collect(job):
             return m
 
     config = load_config(config_path)
+    if variant:
+        sys.path.insert(0, str(ROOT / 'scripts'))
+        import robustness
+        robustness.VARIANTS[variant](config)
     config['seed'] = seed
     sc = generate(config)
     policy = Recorder(floor=3.0)
@@ -116,14 +124,18 @@ def main():
     parser.add_argument('--config', type=Path, default=ROOT / 'configs/ids-place-smokescreen-x3.json')
     parser.add_argument('--seeds', type=int, nargs='+', default=list(range(7, 27)))
     parser.add_argument('--workers', type=int, default=2)
-    parser.add_argument('--output', type=Path, default=ROOT / 'artifacts/value-data')
+    parser.add_argument('--variant', default=None, help='a variant name of scripts/robustness.py')
+    parser.add_argument('--output', type=Path, default=None,
+                        help='default: artifacts/value-data, or artifacts/value-data/<variant>')
     parser.add_argument('--resume', action='store_true')
     args = parser.parse_args()
+    if args.output is None:
+        args.output = ROOT / 'artifacts/value-data' / (args.variant or '')
     seeds = [s for s in args.seeds
              if not (args.resume and (args.output / f'seed-{s}.tasks.jsonl.gz').exists())]
     print(f'{len(args.seeds) - len(seeds)} seeds kept, {len(seeds)} to do', flush=True)
     with ProcessPoolExecutor(args.workers) as pool:
-        futures = [pool.submit(collect, (str(args.config), s, args.output)) for s in seeds]
+        futures = [pool.submit(collect, (str(args.config), args.variant, s, args.output)) for s in seeds]
         for future in as_completed(futures):
             seed, objective, seconds, epochs = future.result()
             print(f'seed {seed}: objective {objective:.4f}, {epochs} epochs ({seconds:.0f} s)', flush=True)

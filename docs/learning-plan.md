@@ -62,8 +62,9 @@ in 2 ms per epoch.
 
 ## Protocol
 
-- Training data: seeds 7–26 per family; evaluation seeds 2–6 in the Python simulator and
-  20 seeds in iFogSim for the final table.
+- Training data: seeds 7–26 per family; evaluation seeds 2–6 in the Python simulator and,
+  for the final table in iFogSim, seeds 2–6 and 27–41 (disjoint from training; the earlier
+  20-seed tables used 2–21, which overlap the training seeds).
 - **Leave-one-family-out**: models are trained on four of F1–F5 (plus F0) and evaluated on
   the held-out family; also reported: trained on all families.
 - Metrics: objective (macro missed detection + 0.05 × false alerts per benign flow),
