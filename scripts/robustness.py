@@ -124,6 +124,29 @@ def make_policy(name, kw):
     return RULES[name](**kw)
 
 
+def policy_for(policy, variant, kw):
+    """Policy by name for one condition; the ``-own`` and ``-loo`` policies load what was
+    tuned or trained for (or without) that condition."""
+    if policy == 'sa-toca-own':  # tuned offline on this variant (scripts/tune_satoca.py --variant)
+        from fogids.baselines import SplitPolicy
+        return SplitPolicy(path=ROOT / f'configs/sa-toca-x3-{variant}.json')
+    if policy == 'ps-anneal-learned-loo':  # trained without this condition
+        from fogids.learned import LearnedPSAnneal
+        return LearnedPSAnneal(ROOT / f'artifacts/models/value-gbm-without-{variant}.pkl', **kw)
+    if policy == 'ps-anneal-dfl-loo':  # both models trained without this condition
+        from fogids.dfl import DFLPSAnneal
+        return DFLPSAnneal(ROOT / f'artifacts/models/value-gbm-without-{variant}.pkl',
+                           ROOT / f'artifacts/models/dfl-without-{variant}.json', **kw)
+    return make_policy(policy, kw)
+
+
+def parse_policy(text):
+    """'name@key=value,key=value' -> (name, {key: float(value)})."""
+    name, _, rest = text.partition('@')
+    kw = {k: float(v) for k, v in (item.split('=') for item in rest.split(',') if item)}
+    return name, kw
+
+
 def run(job):
     group, label, variant, policy, kw, seed = job
     from fogids.smokescreen import Engine, generate
@@ -132,18 +155,7 @@ def run(job):
     VARIANTS[variant](c)
     c['seed'] = seed
     sc = generate(c)
-    if policy == 'sa-toca-own':  # tuned offline on this variant (scripts/tune_satoca.py --variant)
-        from fogids.baselines import SplitPolicy
-        p = SplitPolicy(path=ROOT / f'configs/sa-toca-x3-{variant}.json')
-    elif policy == 'ps-anneal-learned-loo':  # trained without this condition
-        from fogids.learned import LearnedPSAnneal
-        p = LearnedPSAnneal(ROOT / f'artifacts/models/value-gbm-without-{variant}.pkl', **kw)
-    elif policy == 'ps-anneal-dfl-loo':  # both models trained without this condition
-        from fogids.dfl import DFLPSAnneal
-        p = DFLPSAnneal(ROOT / f'artifacts/models/value-gbm-without-{variant}.pkl',
-                        ROOT / f'artifacts/models/dfl-without-{variant}.json', **kw)
-    else:
-        p = make_policy(policy, kw)
+    p = policy_for(policy, variant, kw)
     started = time.perf_counter()
     r = Engine(sc).run(p)
     stats = getattr(p, 'stats', {})

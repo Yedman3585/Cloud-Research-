@@ -7,6 +7,9 @@
 ``--variant`` applies one of the parameter changes of ``scripts/robustness.py``;
 ``--decision-time`` charges the policy's decision time to the simulated clock;
 ``--resume`` skips (variant, decision time, seed, policy) runs already in runs.jsonl.
+Policies outside the fixed list are built by ``scripts/robustness.py``: the ``-own`` and
+``-loo`` policies of the condition, and settings as ``name@key=value`` (for example
+``ps-anneal-alerts@fa_weight=0.01``).
 
 Each run executes in iFogSim (org.fogids.IdsStaged) with decisions from Python; one
 JSON line per run is appended to <output>/runs.jsonl, with the metrics from iFogSim's
@@ -57,10 +60,11 @@ def run(job):
     config['seed'] = seed
     sc = generate(config)
     started = time.perf_counter()
-    if name == 'sa-toca-own':  # tuned offline on this variant
-        policy = SplitPolicy(path=ROOT / f'configs/sa-toca-x3-{variant}.json')
-    else:
+    if name in FACTORIES:
         policy = FACTORIES[name]()
+    else:  # e.g. 'sa-toca-own', 'ps-anneal-dfl-loo', 'ps-anneal-alerts@fa_weight=0.01'
+        base, kw = robustness.parse_policy(name)
+        policy = robustness.policy_for(base, variant, kw)
     r = simulate_ifogsim(sc, policy, decision_time=decision_time)
     return {'config': config['name'], 'variant': variant, 'decision_time': str(decision_time), 'seed': seed,
             'policy': name, 'seconds': time.perf_counter() - started,

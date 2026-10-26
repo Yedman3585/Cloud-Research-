@@ -15,6 +15,7 @@ import math
 import numpy as np
 
 from .learned import LearnedPSAnneal, task_features
+from .smokescreen_qubo import AlertPSAnneal
 
 PHI = ['bias', 'flood', 'prefilter_score', 'log_flows', 'log_packets', 'criticality', 'deadline_s',
        'share_10', 'share_20', 'share_40', 'z_10', 'z_20', 'z_40', 'log_alerts_40',
@@ -51,23 +52,21 @@ class DFLPSAnneal(LearnedPSAnneal):
         self.weights = {}
 
     def decide(self, engine, now, tasks):
-        # Features before the base class updates its evidence: the same moment as when
-        # the training data were recorded.
         for ev in {id(e): e for e in self.horizons.values()}.values():
             ev.update(engine, now)
-        feats = [task_features(t, self.horizons) for t in tasks]
-        out_ = None
         if tasks:
             from threadpoolctl import threadpool_limits
             from .learned import feature_row
+            feats = [task_features(t, self.horizons) for t in tasks]
             with threadpool_limits(1):
                 a_hat = self.model.predict([feature_row(f) for f in feats])
             x = standardise([phi_raw(f, a) for f, a in zip(feats, a_hat)], self.mean, self.std)
             s, lam = np.exp(np.clip(x @ self.theta_s, -20, 20)), np.exp(np.clip(x @ self.theta_l, -30, 10))
-            for t, si, li in zip(tasks, s, lam):
+            for t, a, si, li in zip(tasks, a_hat, s, lam):
+                self.predicted[t.id] = float(a)
                 self.weights[t.id] = (float(si), float(li))
-        out_ = super().decide(engine, now, tasks)
-        return out_
+        # The attack-flow estimates are set; skip the second prediction of the parent.
+        return AlertPSAnneal.decide(self, engine, now, tasks)
 
     def value(self, t, o, share=1.0):
         if o.node is None:
