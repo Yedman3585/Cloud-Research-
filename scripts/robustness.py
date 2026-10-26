@@ -110,6 +110,9 @@ def make_policy(name, kw):
     if name == 'ps-anneal-true-a':
         from fogids.learned import TrueAttackPSAnneal
         return TrueAttackPSAnneal(**{'floor': 3.0, **kw})
+    if name == 'ps-anneal-dfl':  # value weights trained on decision quality (scripts/train_dfl.py)
+        from fogids.dfl import DFLPSAnneal
+        return DFLPSAnneal(ROOT / 'artifacts/models/value-gbm.pkl', ROOT / 'artifacts/models/dfl.json', **kw)
     if name == 'ps-anneal-learned':  # trained on every condition (scripts/train_values.py)
         from fogids.learned import LearnedPSAnneal
         return LearnedPSAnneal(ROOT / 'artifacts/models/value-gbm.pkl', **kw)
@@ -135,6 +138,10 @@ def run(job):
     elif policy == 'ps-anneal-learned-loo':  # trained without this condition
         from fogids.learned import LearnedPSAnneal
         p = LearnedPSAnneal(ROOT / f'artifacts/models/value-gbm-without-{variant}.pkl', **kw)
+    elif policy == 'ps-anneal-dfl-loo':  # both models trained without this condition
+        from fogids.dfl import DFLPSAnneal
+        p = DFLPSAnneal(ROOT / f'artifacts/models/value-gbm-without-{variant}.pkl',
+                        ROOT / f'artifacts/models/dfl-without-{variant}.json', **kw)
     else:
         p = make_policy(policy, kw)
     started = time.perf_counter()
