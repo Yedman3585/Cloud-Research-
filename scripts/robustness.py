@@ -100,7 +100,7 @@ def make_policy(name, kw):
     from fogids.smokescreen import POLICIES as RULES
     from fogids.smokescreen_qubo import AlertPSAnneal, PSAnneal, ValueGreedyAlerts
     if name == 'ps-anneal-alerts':
-        return AlertPSAnneal(floor=3.0, **kw)
+        return AlertPSAnneal(**{'floor': 3.0, **kw})
     if name == 'ps-anneal':
         return PSAnneal(**kw)
     if name == 'ps-anneal-oracle-value':
@@ -109,7 +109,7 @@ def make_policy(name, kw):
         return ValueGreedyAlerts(**kw)
     if name == 'ps-anneal-true-a':
         from fogids.learned import TrueAttackPSAnneal
-        return TrueAttackPSAnneal(floor=3.0, **kw)
+        return TrueAttackPSAnneal(**{'floor': 3.0, **kw})
     if name == 'ps-anneal-learned':  # trained on every condition (scripts/train_values.py)
         from fogids.learned import LearnedPSAnneal
         return LearnedPSAnneal(ROOT / 'artifacts/models/value-gbm.pkl', **kw)
@@ -149,6 +149,17 @@ def run(job):
 
 DEFAULT_VARIANTS = ('base', 'load-x2', 'load-x5', 'extract-1us', 'extract-3us', 'separation-0',
                     'separation-5', 'large')
+
+
+# Hand-tuning check: weight of false alerts in the option value and the floor of the
+# attack-flow estimate (exploration of tasks without evidence).
+GRID = {'fa_weight': (1e-4, 1e-3, 3e-3, 1e-2, 3e-2), 'floor': (3.0, 1.0)}
+
+
+def grid_jobs(seeds, variants, policies):
+    return [('grid', f'{variant} fa={w:g} floor={f:g}', variant, policy, {'fa_weight': w, 'floor': f}, s)
+            for variant in variants for policy in policies
+            for w in GRID['fa_weight'] for f in GRID['floor'] for s in seeds]
 
 
 def jobs(seeds, variants=DEFAULT_VARIANTS, policies=POLICIES, ablations=True):
@@ -210,6 +221,8 @@ def main():
     parser.add_argument('--variants', nargs='+', default=list(DEFAULT_VARIANTS), choices=sorted(VARIANTS))
     parser.add_argument('--policies', nargs='+', default=list(POLICIES))
     parser.add_argument('--no-ablations', action='store_true')
+    parser.add_argument('--grid', action='store_true',
+                        help='only the hand-tuning grid (GRID) for the given variants and policies')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     path = args.output / 'runs.jsonl'
@@ -221,8 +234,9 @@ def main():
             except json.JSONDecodeError:
                 pass
     done = {key(r) for r in rows}
-    todo = [j for j in jobs(args.seeds, args.variants, args.policies, not args.no_ablations)
-            if (j[0], j[1], j[3], j[5]) not in done]
+    planned = (grid_jobs(args.seeds, args.variants, args.policies) if args.grid
+               else jobs(args.seeds, args.variants, args.policies, not args.no_ablations))
+    todo = [j for j in planned if (j[0], j[1], j[3], j[5]) not in done]
     if args.only:
         todo = [j for j in todo if j[0] == args.only[:-1]]
     print(f'{len(done)} runs kept, {len(todo)} to do', flush=True)
