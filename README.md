@@ -5,11 +5,6 @@ and cloud nodes. Python builds a placement QUBO and solves it with classical
 simulated annealing (SA); iFogSim2 executes the assignments with network queues
 and CPU sharing. A greedy baseline and a small exact oracle are included.
 
-The formulation adapts the penalty-encoding pattern from
-[Q-GARS](https://arxiv.org/abs/2603.23127). It is not a reproduction of its ranking
-scheduler, SQA solver, or theoretical guarantees. See the
-[model and implementation notes (Russian)](docs/ids-minimal.md) for equations,
-assumptions, and tests. Reviewed papers are in [papers/](papers/README.md).
 
 ## Quick Start
 
