@@ -456,6 +456,107 @@ split tuned offline with ground truth on the deployment condition, beats it once
 condition shifts, and stays within about one point of a split tuned with full knowledge of
 a non-stationary attack.
 
+## 20 seeds in iFogSim: drift and oracle values
+
+| Policy | x3 | drift |
+|---|---|---|
+| `greedy-v2` | 0.387 ± 0.004 | 0.458 ± 0.006 |
+| `value-greedy-alerts` | 0.325 ± 0.005 | 0.404 ± 0.004 |
+| `sa-toca` (tuned at x3) | **0.251 ± 0.002** | 0.353 ± 0.004 |
+| `sa-toca-own` (tuned on drift, schedule and labels known) | — | 0.329 ± 0.002 |
+| `ps-anneal-alerts` | 0.255 ± 0.003 | 0.340 ± 0.002 |
+| `ps-anneal-oracle-value` (exact values) | 0.228 ± 0.003 | **0.291 ± 0.002** |
+
+Paired, drift: the online method is 1.3 ± 0.3 points better than the split tuned at x3
+and 1.1 ± 0.3 points behind the split tuned on drift itself; with exact values it is
+3.8 points ahead of that split. Headroom of the value estimate in iFogSim: 2.6 ± 0.1
+points at x3, 4.9 ± 0.2 on drift (same as in Python).
+
+## How much a better value estimate could gain (Python simulator, seeds 2–6)
+
+The only uncertain coefficients in the epoch model are the task values; the load terms are
+exact. `ps-anneal-oracle-value` replaces the alert-based value estimate by the exact value
+from ground truth (each task's own contribution to the objective).
+
+| Condition | `ps-anneal-alerts` | oracle values | headroom, points |
+|---|---|---|---|
+| load x1 | **0.086** | 0.106 | −1.9 ± 0.7 |
+| load x2 | 0.149 | 0.144 | 0.5 ± 0.3 |
+| extraction 1 µs | 0.088 | 0.077 | 1.2 ± 0.4 |
+| large topology | 0.260 | 0.237 | 2.3 ± 0.1 |
+| x3 | 0.255 | 0.230 | 2.5 ± 0.3 |
+| separation error 5 % | 0.350 | 0.306 | 4.4 ± 0.4 |
+| drift | 0.340 | 0.291 | 4.9 ± 0.2 |
+| load x5 | 0.379 | 0.327 | 5.2 ± 0.4 |
+
+The headroom grows with the difficulty of the condition. At x1 exact per-task values are
+**worse** than the alert estimate: values that are correct task by task are not the
+coefficients that give the best decisions (the case for decision-focused learning).
+
+## Learned attack-flow estimate (two-stage)
+
+Plan: [learning-plan.md](learning-plan.md). Code: [`learned.py`](../src/fogids/learned.py),
+[`scripts/train_values.py`](../scripts/train_values.py),
+[`scripts/learned_eval.sh`](../scripts/learned_eval.sh).
+
+The option value of `ps-anneal-alerts` has one unknown per task, the attack flows it
+contains (low-rate flows in a residual task). `ps-anneal-learned` predicts it with
+gradient-boosted trees (Poisson loss) from features visible at decision time: pre-filter
+score, stream, size, deadline, the gateway's alerts, expected false alerts and analysed
+recall over 10, 20 and 40 s. Training data: `ps-anneal-alerts` runs on seeds 7–26 (x3) and
+7–16 (x1, x5, separation 5 %, drift); 538 000 tasks. `-loo` is the model trained without
+the evaluated condition. `ps-anneal-true-a` is the same value formula with the true attack
+flows. Prediction takes about 3 ms per epoch.
+
+Rank correlation with the true low-rate flows of residual tasks (held-out seeds): 0.79–0.84
+for the model against 0.43–0.73 for the alert formula; on an unseen condition 0.46–0.75.
+
+| Condition | `ps-anneal-alerts` | `-learned-loo` | `-learned` | `-true-a` | oracle values |
+|---|---|---|---|---|---|
+| load x1 | **0.086** | 0.092 (+0.6 ± 0.9) | 0.095 (+0.9 ± 1.0) | 0.094 | 0.106 |
+| x3 | 0.255 | 0.250 (−0.5 ± 0.3) | 0.249 (−0.7 ± 0.3) | 0.245 | 0.230 |
+| load x5 | 0.379 | **0.352 (−2.7 ± 0.3)** | 0.355 (−2.4 ± 0.9) | 0.358 | 0.327 |
+| separation error 5 % | 0.350 | 0.330 (−2.0 ± 0.5) | **0.329 (−2.0 ± 0.7)** | 0.330 | 0.306 |
+| drift | 0.340 | **0.322 (−1.8 ± 0.6)** | 0.330 (−1.0 ± 0.4) | 0.337 | 0.291 |
+
+(paired differences against `ps-anneal-alerts` in brackets)
+
+1. The learned estimate helps on every hard condition, also when that condition was not
+   in the training data (it closes 21–51 % of the headroom).
+2. It is as good as the formula with the **true** attack flows: estimating the flows
+   better cannot gain more. The rest of the headroom is in the form of the value
+   (the oracle raises 3–4 times fewer false alerts).
+3. Better prediction is not better decisions: on drift the model trained on all
+   conditions predicts better (0.79 against 0.66) and decides worse (0.330 against 0.322).
+4. Without the floor of 3 attack flows the learned estimate stops analysing tasks that
+   have no alerts yet, which then never raise any (objective 0.71 on one seed): the
+   estimate shapes its own future features.
+
+## Hand tuning against learning (Python simulator, seeds 2–6)
+
+Grid over the false-alert weight of the option value (1e-4, 1e-3, 3e-3, 1e-2, 3e-2) and the
+floor of the attack-flow estimate (3, 1) for the alert formula and for `-learned-loo`
+([`scripts/hand_tuning.sh`](../scripts/hand_tuning.sh)). The best setting is chosen on
+the evaluation seeds themselves, which favours hand tuning.
+
+| Condition | formula, as is | formula, best setting | learned, best setting | learned, one setting (1e-3, 3) | oracle values |
+|---|---|---|---|---|---|
+| x3 | 0.257 | 0.255 (1e-4, 1) | **0.248** | 0.248 | 0.230 |
+| load x5 | 0.379 | **0.344** (1e-2, 3) | **0.343** | 0.343 | 0.327 |
+| separation error 5 % | 0.350 | 0.338 (1e-2, 3) | **0.328** | 0.328 | 0.306 |
+| drift | 0.341 | 0.325 (1e-2, 3) | **0.316** | 0.316 | 0.291 |
+
+1. The false-alert weight 1e-4 used so far is too low for the formula under heavy load;
+   tuning it gains 3.5 points at x5, where it matches the learned estimate.
+2. The learned estimate is about 1 point better than the tuned formula at x3, with 5 %
+   separation error and on drift, with **one** setting for all conditions; the formula
+   needs a different weight at x3 (1e-4) than elsewhere (1e-2). With one setting for the
+   formula (1e-2, 3) the learned estimate is 0.7 points better on average.
+3. The learned estimate with one setting at x3 (0.248) is better than the static split
+   tuned offline with labels on x3 (`sa-toca`, 0.252).
+4. 1.6–2.5 points to the oracle values remain on every condition: the target for
+   decision-focused learning, to be compared with the tuned formula.
+
 ## Next
 
 - A bound that carries work across windows (the per-window processor-sharing bound
