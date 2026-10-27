@@ -557,6 +557,35 @@ the evaluation seeds themselves, which favours hand tuning.
 4. 1.6–2.5 points to the oracle values remain on every condition: the target for
    decision-focused learning, to be compared with the tuned formula.
 
+## Learned and decision-focused values in iFogSim (20 seeds)
+
+Seeds 2–6 and 27–41 (disjoint from the training seeds 7–26); learned models trained
+without the evaluated condition; [`scripts/night_runs4.sh`](../scripts/night_runs4.sh).
+Paired differences against the learned estimate (weight 1e-3) in brackets.
+
+| Policy | x3 | drift |
+|---|---|---|
+| alert formula, as is | 0.254 ± 0.002 (+0.7 ± 0.1) | 0.341 ± 0.003 (+2.5 ± 0.2) |
+| alert formula, false-alert weight 1e-2 (hand-tuned) | 0.254 ± 0.003 (+0.7 ± 0.2) | 0.325 ± 0.002 (+1.0 ± 0.2) |
+| learned estimate, weight 1e-3 (`-learned-loo`) | 0.247 ± 0.002 | 0.315 ± 0.002 |
+| decision-focused weights (`-dfl-loo`) | **0.245 ± 0.002** (−0.2 ± 0.1) | **0.312 ± 0.002** (−0.3 ± 0.2) |
+| oracle values | 0.228 ± 0.002 | 0.290 ± 0.002 |
+
+Measured decision time charged to the simulated clock (x3, 10 seeds, 10 ms annealing
+budget): alert formula 0.269 ± 0.003 (17 ms per epoch), learned 0.265 ± 0.004 (20 ms),
+decision-focused 0.262 ± 0.004 (20 ms; −0.2 ± 0.2 against learned).
+
+1. Over 20 seeds the decision-focused weights are better than the learned estimate on both
+   conditions, by a small margin (0.2–0.3 points); over 5 seeds in Python the difference
+   was within noise.
+2. The learned estimate is 0.7 (x3) and 1.0 (drift) points better than the alert formula
+   hand-tuned on the evaluation seeds.
+3. The prediction costs about 3 ms per epoch; the gain survives charged decision time.
+4. For reference (other seeds, 2–21): `sa-toca` reaches 0.251 at x3 and the split tuned on
+   drift with its schedule and labels 0.329 on drift; the decision-focused policy is ahead
+   of both.
+5. 1.7–2.2 points to the oracle values remain (information the scheduler does not have).
+
 ## Next
 
 - A bound that carries work across windows (the per-window processor-sharing bound

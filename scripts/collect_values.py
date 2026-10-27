@@ -47,15 +47,14 @@ def collect(job):
             for ev in self.extra.values():
                 ev.update(engine, now)
             self.evidence.update(engine, now)
+            from fogids.learned import task_features
+            evidence = {'10': self.extra[10.0], '20': self.extra[20.0], '40': self.evidence}
             features = []
             for t in tasks:
                 f = {'id': t.id, 'gateway': t.gateway, 'release_s': t.release_s, 'deadline_s': t.deadline_s,
-                     'stream': t.stream, 'n_flows': t.n_flows, 'packets': t.packets,
+                     'stream': t.stream, 'n_flows': t.n_flows, 'packets': t.packets, 'raw_bytes': t.raw_bytes,
                      'prefilter_score': t.prefilter_score, 'criticality': t.criticality}
-                for h, ev in (('10', self.extra[10.0]), ('20', self.extra[20.0]), ('40', self.evidence)):
-                    A, E, N = ev.acc.get(t.gateway, (0.0, 0.0, 0.0))
-                    f.update({f'alerts_{h}': A, f'expected_false_{h}': E, f'analysed_recall_{h}': N,
-                              f'share_{h}': ev.share(t.gateway), f'z_{h}': ev.z(t.gateway)})
+                f.update(task_features(t, evidence, self.sc))
                 features.append(f)
             self._features = features
             out_ = super().decide(engine, now, tasks)
@@ -84,11 +83,11 @@ def collect(job):
             return m
 
     config = load_config(config_path)
+    config['seed'] = seed  # before the variant: the scenario families draw from it
     if variant:
         sys.path.insert(0, str(ROOT / 'scripts'))
         import robustness
         robustness.VARIANTS[variant](config)
-    config['seed'] = seed
     sc = generate(config)
     policy = Recorder(floor=3.0)
     started = time.perf_counter()

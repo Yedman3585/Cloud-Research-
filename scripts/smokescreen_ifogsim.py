@@ -56,8 +56,8 @@ def run(job):
     sys.path.insert(0, str(ROOT / 'scripts'))
     import robustness
     config = load_config(config_path)
+    config['seed'] = seed  # before the variant: the scenario families draw from it
     robustness.VARIANTS[variant](config)
-    config['seed'] = seed
     sc = generate(config)
     started = time.perf_counter()
     if name in FACTORIES:

@@ -30,11 +30,11 @@ def main():
     configs = []
     for s in args.seeds:
         c = load_config(args.config)
+        c['seed'] = s  # before the variant: the scenario families draw from it
         if args.variant:
             sys.path.insert(0, str(ROOT / 'scripts'))
             import robustness
             robustness.VARIANTS[args.variant](c)
-        c['seed'] = s
         configs.append(c)
     params, objective, history = tune_splits(configs, args.iterations, args.seed,
                                              log=lambda m: print(m, flush=True))

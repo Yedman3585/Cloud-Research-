@@ -82,6 +82,9 @@ VARIANTS = {
     'large': _large,
     'drift': _drift,
 }
+# Scenario families of docs/learning-plan.md (they draw from the configuration seed).
+from fogids.families import FAMILIES  # noqa: E402
+VARIANTS.update(FAMILIES)
 
 ABLATIONS = {
     'ps-anneal (no alerts)': ('ps-anneal', {}),
@@ -133,6 +136,10 @@ def policy_for(policy, variant, kw):
     if policy == 'ps-anneal-learned-loo':  # trained without this condition
         from fogids.learned import LearnedPSAnneal
         return LearnedPSAnneal(ROOT / f'artifacts/models/value-gbm-without-{variant}.pkl', **kw)
+    if policy in ('ps-anneal-learned2', 'ps-anneal-learned2-loo'):  # feature set v2, scenario families
+        from fogids.learned import LearnedPSAnneal
+        name = 'value-gbm-v2' + (f'-without-{variant}' if policy.endswith('-loo') else '')
+        return LearnedPSAnneal(ROOT / f'artifacts/models/{name}.pkl', **kw)
     if policy == 'ps-anneal-dfl-loo':  # both models trained without this condition
         from fogids.dfl import DFLPSAnneal
         return DFLPSAnneal(ROOT / f'artifacts/models/value-gbm-without-{variant}.pkl',
@@ -152,10 +159,11 @@ def run(job):
     from fogids.smokescreen import Engine, generate
     c = json.loads(BASE.read_text(encoding='utf-8'))
     c = copy.deepcopy(c)
+    c['seed'] = seed  # before the variant: the scenario families draw from it
     VARIANTS[variant](c)
-    c['seed'] = seed
     sc = generate(c)
-    p = policy_for(policy, variant, kw)
+    base, extra = parse_policy(policy)  # 'name@key=value' settings
+    p = policy_for(base, variant, {**extra, **kw})
     started = time.perf_counter()
     r = Engine(sc).run(p)
     stats = getattr(p, 'stats', {})

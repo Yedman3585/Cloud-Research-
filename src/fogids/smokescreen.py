@@ -110,6 +110,39 @@ class Scenario:
         self.models = topology.models
         self.fractions = tuple(params['fractions'])
         self.classes = sorted({c for t in tasks for c, _ in t.attacks})
+        self.profiles = None  # optional device profiles per gateway (``set_profiles``)
+
+    # Detector quality where a task comes from: the model's calibrated rates unless the
+    # gateway has a device profile (scenario family F1); hidden from the schedulers.
+    def set_profiles(self, types, initial, changes):
+        """``types`` {name: {'fpr': x, 'recall': y}}, ``initial`` {gateway: name},
+        ``changes`` [(time_s, gateway, name)]."""
+        self.profiles = (types, dict(initial), sorted(changes))
+
+    def device_profile(self, gateway, time_s):
+        """Name of the gateway's device profile at ``time_s`` (None without profiles)."""
+        if self.profiles is None:
+            return None
+        _, initial, changes = self.profiles
+        name = initial[gateway]
+        for t, gw, new in changes:
+            if t <= time_s and gw == gateway:
+                name = new
+        return name
+
+    def _factors(self, task):
+        if self.profiles is None:
+            return 1.0, 1.0
+        p = self.profiles[0][self.device_profile(task.gateway, task.release_s)]
+        return p['fpr'], p['recall']
+
+    def recall(self, task, model, cls):
+        r = self.model(model).recall.get(cls, 0.0)
+        return r if self.profiles is None else min(1.0, r * self._factors(task)[1])
+
+    def fpr(self, task, model):
+        r = self.model(model).false_positive_rate
+        return r if self.profiles is None else min(0.95, r * self._factors(task)[0])
 
     def node(self, name):
         return self.topology.node(name)
@@ -167,13 +200,12 @@ class Scenario:
         """{class: probability of detecting the class in this task}."""
         if opt.node is None or not on_time:
             return {c: 0.0 for c, _ in task.attacks}
-        m = self.model(opt.model)
-        return {c: 1.0 - (1.0 - opt.f * m.recall.get(c, 0.0)) ** a for c, a in task.attacks}
+        return {c: 1.0 - (1.0 - opt.f * self.recall(task, opt.model, c)) ** a for c, a in task.attacks}
 
     def false_alerts(self, task, opt, on_time=True):
         if opt.node is None or not on_time:
             return 0.0
-        return opt.f * task.benign_flows * self.model(opt.model).false_positive_rate
+        return opt.f * task.benign_flows * self.fpr(task, opt.model)
 
     def class_counts(self):
         counts = {}
@@ -250,6 +282,7 @@ def generate(c):
     W, horizon = c['window_s'], c['horizon_s']
     phases = [stream.uniform() * W for _ in gateways]
     eps = v2['separation_error']
+    surges = c.get('surges', [])
     raw = []
     for w in range(int(round(horizon / W))):
         for g, gw in enumerate(gateways):
@@ -257,6 +290,17 @@ def generate(c):
             if t1 > horizon:
                 continue
             benign = stream.poisson(traffic['benign_flows_per_s'] * W * stream.lognormal_unit_mean(traffic['benign_jitter']))
+            # Benign surges (flash crowds, family F4): extra benign flows, a share of
+            # which the header pass takes for heavy hitters. Drawn only where a surge is
+            # active, so configurations without surges keep their random stream.
+            surge = surge_flood = 0
+            for s in surges:
+                if g in s['gateways']:
+                    x = _burst_overlap({**s, 'ramp_s': s.get('ramp_s', 0.0)}, t0, t1)
+                    if x > 0:
+                        extra = stream.poisson(traffic['benign_flows_per_s'] * (s['factor'] - 1.0) * x)
+                        surge += extra
+                        surge_flood += int(round(s.get('flood_share', 0.0) * extra))
             attacks = {}
             for b in bursts:
                 if g in b['targets']:
@@ -277,6 +321,9 @@ def generate(c):
                 streams['residual']['benign'] = benign - leak
             for c_, a in quiet.items():
                 streams['residual'][c_] = a
+            if surge:
+                streams['flood']['benign'] += surge_flood
+                streams['residual']['benign'] += surge - surge_flood
             for name in ('flood', 'residual'):
                 comp = {k: v for k, v in streams[name].items() if v > 0}
                 total = sum(comp.values())
@@ -306,7 +353,12 @@ def generate(c):
                         done[key] += share[key]
     raw.sort(key=lambda r: (r[0], r[1]))
     tasks = [STask(**{**t.__dict__, 'id': i}) for i, (_, _, t) in enumerate(raw)]
-    return Scenario(c, topology, tasks, params)
+    sc = Scenario(c, topology, tasks, params)
+    if 'profiles' in c:  # device profiles per gateway (family F1)
+        p = c['profiles']
+        sc.set_profiles(p['types'], {gateways[g].name: name for g, name in enumerate(p['initial'])},
+                        [(t_, gateways[g].name, name) for t_, g, name in p.get('changes', [])])
+    return sc
 
 
 # Exact simulator -------------------------------------------------------------
@@ -356,17 +408,16 @@ class Engine:
         ``artifacts/calibration/alert-groups.json``)."""
         if opt is None or opt.node is None or t > task.release_s + task.deadline_s + TOL:
             return None
-        m = self.sc.model(opt.model)
         flood = quiet = 0
         for c, a in task.attacks:
             k = self._binomial(a, opt.f)
-            hits = self._binomial(k, m.recall.get(c, 0.0))
+            hits = self._binomial(k, self.sc.recall(task, opt.model, c))
             if c in FLOOD:
                 flood += hits
             else:
                 quiet += hits
         benign = self._binomial(task.benign_flows, opt.f)
-        quiet += self._binomial(benign, m.false_positive_rate)
+        quiet += self._binomial(benign, self.sc.fpr(task, opt.model))
         analysed = round(opt.f * task.n_flows)
         return Alert(t, task.gateway, task.stream, opt.model, opt.f, analysed, flood, quiet)
 

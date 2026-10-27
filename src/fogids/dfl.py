@@ -14,7 +14,7 @@ import math
 
 import numpy as np
 
-from .learned import LearnedPSAnneal, task_features
+from .learned import FEATURES_V2, LearnedPSAnneal, task_features
 from .smokescreen_qubo import AlertPSAnneal
 
 PHI = ['bias', 'flood', 'prefilter_score', 'log_flows', 'log_packets', 'criticality', 'deadline_s',
@@ -57,9 +57,10 @@ class DFLPSAnneal(LearnedPSAnneal):
         if tasks:
             from threadpoolctl import threadpool_limits
             from .learned import feature_row
-            feats = [task_features(t, self.horizons) for t in tasks]
+            sc = self.sc if self.features == FEATURES_V2 else None
+            feats = [task_features(t, self.horizons, sc) for t in tasks]
             with threadpool_limits(1):
-                a_hat = self.model.predict([feature_row(f) for f in feats])
+                a_hat = self.model.predict([feature_row(f, self.features) for f in feats])
             x = standardise([phi_raw(f, a) for f, a in zip(feats, a_hat)], self.mean, self.std)
             s, lam = np.exp(np.clip(x @ self.theta_s, -20, 20)), np.exp(np.clip(x @ self.theta_l, -30, 10))
             for t, a, si, li in zip(tasks, a_hat, s, lam):

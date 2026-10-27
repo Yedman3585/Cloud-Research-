@@ -14,16 +14,22 @@ from .smokescreen_qubo import AlertEvidence, AlertPSAnneal
 HORIZONS = (('10', 10.0), ('20', 20.0), ('40', 40.0))
 FEATURES = ['flood', 'prefilter_score', 'n_flows', 'packets', 'criticality', 'deadline_s'] + [
     f'{k}_{h}' for h, _ in HORIZONS for k in ('alerts', 'expected_false', 'analysed_recall', 'share', 'z')]
+PROFILES = ('camera', 'hub', 'sensor')
+# Second feature set (scenario families): bytes per packet, the gateway's device profile
+# and the alert evidence of the other gateways of its fog subtree over 40 s.
+FEATURES_V2 = FEATURES + ['bytes_per_packet'] + [f'device_{p}' for p in PROFILES] + [
+    f'nb_{k}_40' for k in ('alerts', 'expected_false', 'analysed_recall', 'share')]
 
 
-def feature_row(f):
+def feature_row(f, names=FEATURES):
     """Feature vector from a recorded task row (``collect_values.py``) or ``task_features``."""
-    return [1.0 if f['stream'] == 'flood' else 0.0] + [float(f[k]) for k in FEATURES[1:]]
+    return [1.0 if f['stream'] == 'flood' else 0.0] + [float(f[k]) for k in names[1:]]
 
 
-def task_features(t, evidence):
+def task_features(t, evidence, sc=None):
     """The recorded features of task ``t``; ``evidence`` maps '10', '20', '40' to an
-    up-to-date ``AlertEvidence`` with that horizon."""
+    up-to-date ``AlertEvidence`` with that horizon. With the scenario ``sc`` also the
+    features of ``FEATURES_V2``."""
     f = {'stream': t.stream, 'prefilter_score': t.prefilter_score, 'n_flows': t.n_flows,
          'packets': t.packets, 'criticality': t.criticality, 'deadline_s': t.deadline_s}
     for h, _ in HORIZONS:
@@ -31,6 +37,18 @@ def task_features(t, evidence):
         A, E, N = ev.acc.get(t.gateway, (0.0, 0.0, 0.0))
         f.update({f'alerts_{h}': A, f'expected_false_{h}': E, f'analysed_recall_{h}': N,
                   f'share_{h}': ev.share(t.gateway), f'z_{h}': ev.z(t.gateway)})
+    if sc is not None:
+        f['bytes_per_packet'] = t.raw_bytes / max(1, t.packets)
+        profile = sc.device_profile(t.gateway, t.release_s)  # device types are known to the operator
+        f.update({f'device_{p}': 1.0 if profile == p else 0.0 for p in PROFILES})
+        ev = evidence['40']
+        parent = sc.node(t.gateway).parent
+        A = E = N = 0.0
+        for gw, (a, e, n) in ev.acc.items():
+            if gw != t.gateway and sc.node(gw).parent == parent:
+                A, E, N = A + a, E + e, N + n
+        f.update({'nb_alerts_40': A, 'nb_expected_false_40': E, 'nb_analysed_recall_40': N,
+                  'nb_share_40': max(0.0, A - E) / N if N else 0.0})
     return f
 
 
@@ -46,9 +64,10 @@ class LearnedPSAnneal(AlertPSAnneal):
     def __init__(self, model_path, floor=3.0, **kw):
         super().__init__(floor=floor, **kw)
         bundle = load_model(model_path)
-        if bundle['features'] != FEATURES:
+        if bundle['features'] not in (FEATURES, FEATURES_V2):
             raise ValueError(f'{model_path}: trained on other features')
         self.model = bundle['model']
+        self.features = bundle['features']
         self.predicted = {}
 
     def reset(self, sc):
@@ -64,7 +83,8 @@ class LearnedPSAnneal(AlertPSAnneal):
             ev.update(engine, now)
         if tasks:
             from threadpoolctl import threadpool_limits
-            X = [feature_row(task_features(t, self.horizons)) for t in tasks]
+            sc = self.sc if self.features == FEATURES_V2 else None
+            X = [feature_row(task_features(t, self.horizons, sc), self.features) for t in tasks]
             with threadpool_limits(1):  # parallel workers would fight over OpenMP threads
                 predicted = self.model.predict(X)
             for t, a in zip(tasks, predicted):

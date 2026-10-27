@@ -98,3 +98,16 @@ H4 fails, that value accuracy is the right target here.
 3. Data collection per family; two-stage models.
 4. Decision-focused training.
 5. Final table in iFogSim.
+
+## Amendments (before the family experiments)
+
+- **F3** is implemented with a fixed migration schedule (every 8–12 s to gateways not used
+  in the last two periods) instead of an attacker that reacts to its own alerts: the
+  traffic of a run is generated before the run starts. The rate (0.25 flows/s per class
+  and gateway) gives about two alerts per 10 s on a fully analysed gateway.
+- **Features for the families** (feature set v2, `fogids.learned.FEATURES_V2`): bytes per
+  packet, the gateway's device profile (F1; device types are known to the operator) and
+  the alert evidence of the other gateways of the same fog subtree over 40 s.
+- Results so far on the earlier conditions (x1, x3, x5, 5 % separation error, drift) are in
+  [smokescreen.md](smokescreen.md): the learned estimate beats the hand-tuned formula by
+  0.7–1.0 points and decision-focused weights add 0.2–0.3 points (iFogSim, 20 seeds).

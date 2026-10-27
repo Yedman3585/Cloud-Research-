@@ -21,18 +21,21 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 
 
-def load(data):
-    from fogids.learned import feature_row
+def load(data, names=None, variants=None):
+    from fogids.learned import FEATURES, feature_row
+    names = names or FEATURES
     rows = []
     for path in sorted(data.rglob('seed-*.tasks.jsonl.gz')):
         variant = 'base' if path.parent == data else path.parent.name
+        if variants and variant not in variants:
+            continue
         seed = int(path.name.split('-')[1].split('.')[0])
         with gzip.open(path, 'rt', encoding='utf-8') as fh:
             for line in fh:
                 r = json.loads(line)
                 if 'prefilter_score' not in r:  # never offered to the scheduler
                     continue
-                rows.append((variant, seed, feature_row(r), target(r), r))
+                rows.append((variant, seed, feature_row(r, names), target(r), r))
     return rows
 
 
@@ -78,8 +81,7 @@ def report(rows, model):
     return out
 
 
-def train(rows, exclude, out_path):
-    from fogids.learned import FEATURES
+def train(rows, exclude, out_path, names):
     use = [r for r in rows if r[0] != exclude]
     seeds = {}
     for r in use:
@@ -92,7 +94,7 @@ def train(rows, exclude, out_path):
     final = fit([r[2] for r in use], [r[3] for r in use])
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, 'wb') as fh:
-        pickle.dump({'model': final, 'features': FEATURES, 'trained_on': sorted(seeds)}, fh)
+        pickle.dump({'model': final, 'features': names, 'trained_on': sorted(seeds)}, fh)
     print(f'\n{out_path.name}: trained on {", ".join(sorted(seeds))} ({len(use)} tasks)')
     print(f'{"held-out":20s} {"tasks":>7s} {"MAE model":>10s} {"MAE formula":>12s} {"rho model":>10s} {"rho formula":>12s}')
     for v, s in rep.items():
@@ -107,15 +109,21 @@ def main():
     parser.add_argument('--data', type=Path, default=ROOT / 'artifacts/value-data')
     parser.add_argument('--output', type=Path, default=ROOT / 'artifacts/models')
     parser.add_argument('--loo', action='store_true', help='also train one model without each condition')
+    parser.add_argument('--features', choices=('v1', 'v2'), default='v1',
+                        help='v2 adds bytes per packet, device profile and fog-subtree alerts')
+    parser.add_argument('--variants', nargs='+', default=None, help='only these conditions')
+    parser.add_argument('--prefix', default='value-gbm', help='file name prefix of the models')
     args = parser.parse_args()
-    rows = load(args.data)
+    from fogids.learned import FEATURES, FEATURES_V2
+    names = FEATURES_V2 if args.features == 'v2' else FEATURES
+    rows = load(args.data, names, args.variants)
     variants = sorted({r[0] for r in rows})
     print(f'{len(rows)} tasks from {", ".join(variants)}', flush=True)
-    reports = {'all': train(rows, None, args.output / 'value-gbm.pkl')}
+    reports = {'all': train(rows, None, args.output / f'{args.prefix}.pkl', names)}
     if args.loo:
         for v in variants:
-            reports[f'without-{v}'] = train(rows, v, args.output / f'value-gbm-without-{v}.pkl')
-    (args.output / 'report.json').write_text(json.dumps(reports, indent=1), encoding='utf-8')
+            reports[f'without-{v}'] = train(rows, v, args.output / f'{args.prefix}-without-{v}.pkl', names)
+    (args.output / f'{args.prefix}-report.json').write_text(json.dumps(reports, indent=1), encoding='utf-8')
     return 0
 
 
