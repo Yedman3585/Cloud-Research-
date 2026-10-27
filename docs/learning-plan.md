@@ -111,3 +111,8 @@ H4 fails, that value accuracy is the right target here.
 - Results so far on the earlier conditions (x1, x3, x5, 5 % separation error, drift) are in
   [smokescreen.md](smokescreen.md): the learned estimate beats the hand-tuned formula by
   0.7–1.0 points and decision-focused weights add 0.2–0.3 points (iFogSim, 20 seeds).
+
+## Results
+
+On the families and the earlier conditions, with the outcome of every hypothesis:
+[families.md](families.md).
