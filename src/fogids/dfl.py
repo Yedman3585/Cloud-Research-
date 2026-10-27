@@ -22,13 +22,20 @@ PHI = ['bias', 'flood', 'prefilter_score', 'log_flows', 'log_packets', 'critical
        'log_expected_false_40', 'log_attack']
 
 
-def phi_raw(f, a_hat):
+PHI_V2 = PHI + ['device_camera', 'device_hub', 'device_sensor', 'nb_share_40', 'log_bytes_per_packet']
+
+
+def phi_raw(f, a_hat, names=PHI):
     """Task features of the value weights (unstandardised; ``bias`` is 1)."""
-    return [1.0, 1.0 if f['stream'] == 'flood' else 0.0, f['prefilter_score'], math.log1p(f['n_flows']),
-            math.log1p(f['packets']), f['criticality'], f['deadline_s'], f['share_10'], f['share_20'],
-            f['share_40'], min(max(f['z_10'], -5.0), 20.0), min(max(f['z_20'], -5.0), 20.0),
-            min(max(f['z_40'], -5.0), 20.0), math.log1p(f['alerts_40']), math.log1p(f['expected_false_40']),
-            math.log1p(max(a_hat, 0.0))]
+    out = [1.0, 1.0 if f['stream'] == 'flood' else 0.0, f['prefilter_score'], math.log1p(f['n_flows']),
+           math.log1p(f['packets']), f['criticality'], f['deadline_s'], f['share_10'], f['share_20'],
+           f['share_40'], min(max(f['z_10'], -5.0), 20.0), min(max(f['z_20'], -5.0), 20.0),
+           min(max(f['z_40'], -5.0), 20.0), math.log1p(f['alerts_40']), math.log1p(f['expected_false_40']),
+           math.log1p(max(a_hat, 0.0))]
+    if names == PHI_V2:
+        out += [f['device_camera'], f['device_hub'], f['device_sensor'], f['nb_share_40'],
+                math.log1p(f['bytes_per_packet'])]
+    return out
 
 
 def standardise(raw, mean, std):
@@ -45,8 +52,9 @@ class DFLPSAnneal(LearnedPSAnneal):
         super().__init__(model_path, **kw)
         with open(params_path, encoding='utf-8') as fh:
             p = json.load(fh)
-        if p['phi'] != PHI:
+        if p['phi'] not in (PHI, PHI_V2):
             raise ValueError(f'{params_path}: other features')
+        self.phi_names = p['phi']
         self.mean, self.std = np.array(p['mean']), np.array(p['std'])
         self.theta_s, self.theta_l = np.array(p['theta_s']), np.array(p['theta_l'])
         self.weights = {}
@@ -61,7 +69,7 @@ class DFLPSAnneal(LearnedPSAnneal):
             feats = [task_features(t, self.horizons, sc) for t in tasks]
             with threadpool_limits(1):
                 a_hat = self.model.predict([feature_row(f, self.features) for f in feats])
-            x = standardise([phi_raw(f, a) for f, a in zip(feats, a_hat)], self.mean, self.std)
+            x = standardise([phi_raw(f, a, self.phi_names) for f, a in zip(feats, a_hat)], self.mean, self.std)
             s, lam = np.exp(np.clip(x @ self.theta_s, -20, 20)), np.exp(np.clip(x @ self.theta_l, -30, 10))
             for t, a, si, li in zip(tasks, a_hat, s, lam):
                 self.predicted[t.id] = float(a)

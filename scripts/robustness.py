@@ -110,6 +110,9 @@ def make_policy(name, kw):
         return PSAnneal(oracle_value=True, **kw)
     if name == 'value-greedy-alerts':
         return ValueGreedyAlerts(**kw)
+    if name == 'ps-anneal-adaptive':  # alert formula with online false-positive rate and change detection
+        from fogids.adaptive import AdaptiveAlertPSAnneal
+        return AdaptiveAlertPSAnneal(**kw)
     if name == 'ps-anneal-true-a':
         from fogids.learned import TrueAttackPSAnneal
         return TrueAttackPSAnneal(**{'floor': 3.0, **kw})
@@ -140,6 +143,11 @@ def policy_for(policy, variant, kw):
         from fogids.learned import LearnedPSAnneal
         name = 'value-gbm-v2' + (f'-without-{variant}' if policy.endswith('-loo') else '')
         return LearnedPSAnneal(ROOT / f'artifacts/models/{name}.pkl', **kw)
+    if policy in ('ps-anneal-dfl2', 'ps-anneal-dfl2-loo'):  # feature set v2, scenario families
+        from fogids.dfl import DFLPSAnneal
+        suffix = f'-without-{variant}' if policy.endswith('-loo') else ''
+        return DFLPSAnneal(ROOT / f'artifacts/models/value-gbm-v2{suffix}.pkl',
+                           ROOT / f'artifacts/models/dfl2{suffix}.json', **kw)
     if policy == 'ps-anneal-dfl-loo':  # both models trained without this condition
         from fogids.dfl import DFLPSAnneal
         return DFLPSAnneal(ROOT / f'artifacts/models/value-gbm-without-{variant}.pkl',
