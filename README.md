@@ -330,3 +330,5 @@ The next integration step is a persistent Java–Python protocol carrying a
 and solver runtime, with a freshness check before applying decisions. Adapting
 Hedge to discrete, state-changing schedules requires separate feedback and regret
 assumptions; Q-GARS guarantees do not transfer automatically.
+
+
