@@ -110,7 +110,8 @@ Learned and DFL trained without the evaluated condition (x1: weight 1e-4).
 
 ## Next
 
-- iFogSim, 20 seeds, for F1, F3 and F4 (where the estimates differ most).
+- iFogSim, 20 seeds, for F1, F3 and F4: done, in [learned-values.md](learned-values.md)
+  (section 6); it confirms the Python results.
 - Paper: method (exact processor-sharing epoch model and annealer), alert-based values,
   learned and decision-focused values, and these families as the test of when learning
   pays off.
