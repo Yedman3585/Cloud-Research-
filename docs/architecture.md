@@ -1,6 +1,13 @@
 # Архитектура проекта: компоненты, файлы и связи
 
-Состояние на коммит `bcae830` (M5) плюс модель равного деления CPU (`ps_model.py`). Документ описывает техническое устройство: какие
+Состояние на коммит `bcae830` (M5) плюс модель равного деления CPU (`ps_model.py`).
+
+> **Примечание (октябрь 2026).** Этот документ описывает архитектуру v1 (контуры A, B, C
+> и PS-модель). С тех пор появились smokescreen-сценарий (`smokescreen.py`,
+> `smokescreen_qubo.py`), быстрый отжиг (`fast_anneal.py`), learned-модель
+> (`learned.py`), DFL (`dfl.py`), адаптивная формула (`adaptive.py`), семейства
+> F1–F5 (`families.py`), бейзлайны (`baselines.py`) и Java-драйвер `IdsStaged.java`.
+> Полная карта файлов — в обновлённой секции 8. Документ описывает техническое устройство: какие
 компоненты есть, в каких файлах они лежат, какие данные передают друг другу и где
 проходят границы между ML-частью, задачей IDS-PLACE, симуляцией в iFogSim и
 QUBO-частью. Научная сторона (гипотезы, результаты, выводы) описана в
@@ -334,37 +341,54 @@ decide(snapshot) ->    # [(task_id, node, model)] для всех snapshot.tasks
 ## 8. Карта файлов
 
 ```
-README.md                    обзор, установка, проверенные прогоны
-pyproject.toml               пакет fogids; extras: calibration (torch, numpy, pandas), analysis (matplotlib)
-configs/                     сценарии, калиброванные конфиги, профиль калибровки, lock iFogSim
+README.md                    обзор, установка, результаты
+pyproject.toml               пакет fogids
+configs/                     сценарии, калиброванные конфиги, lock iFogSim
 docs/
-  research-overview.md       научный обзор работы (рус.)
+  ids-place-full-documentation.md  единая подробная документация
+  research-overview.md       научный обзор (рус.)
   architecture.md            этот документ
-  ids-place.md               спецификация IDS-PLACE + результаты M2–M5
-  ps-model.md                модель равного деления CPU и ps-greedy: метод и результаты
-  ids-minimal.md             QUBO-демо: формулы и допущения (рус.)
-  calibration.md             калибровка M4: метод и результаты
-  figures/                   графики M3
+  smokescreen.md             smokescreen-сценарий и результаты
+  families.md                семейства F1-F5
+  learned-values.md          learned estimate и DFL
+  learned-value-overview.md  краткий обзор learned model
+  learning-plan.md           предрегистрированный план
+  ids-place.md               спецификация v1, вехи M1-M5
+  ps-model.md                модель процессорного деления
+  calibration.md             калибровка CICIoT2023
+  ids-minimal.md             QUBO-демо (рус.)
+  figures/                   графики
 java/org/fogids/
-  IdsOnline.java             онлайн-драйвер по эпохам
-  IdsBatch.java              пакетный драйвер QUBO-демо + InferenceScheduler
+  IdsStaged.java             iFogSim2-драйвер для smokescreen
+  IdsOnline.java             онлайн-драйвер по эпохам (v1)
+  IdsBatch.java              пакетный драйвер QUBO-демо
 scripts/
   bootstrap.py               окружение и iFogSim
-  ifogsim.py                 сборка и запуск upstream
+  ifogsim.py                 сборка upstream
   calibrate.py               калибровка на CICIoT2023
-  ps_eval.py                 оценка PSModel и ps-greedy (seeds × нагрузки)
+  train_values.py            обучение GBT-модели
+  train_dfl.py               обучение DFL
+  collect_values.py          сбор обучающих данных
+  robustness.py              оценка по условиям
+  night_runs4..7.sh          ночные прогоны iFogSim
 src/fogids/
+  smokescreen.py             Python-симулятор, генератор сценариев
+  smokescreen_qubo.py        QUBO-политики: ps-anneal, oracle
+  fast_anneal.py             Numba-отжиг (~120k ходов / 50 мс)
+  learned.py                 LearnedPSAnneal: GBT-предсказание
+  adaptive.py                адаптивная формула
+  dfl.py                     decision-focused learning
+  families.py                семейства F1-F5
+  baselines.py               SA-TOCA и FOG-QIEA
   problem.py, generator.py   модель задачи и генератор
   bridge.py                  связь с JVM
-  policies.py                политики и QueueModel
-  metrics.py                 метрики
-  simulate.py, sweep.py      прогоны
-  bounds.py, oracle.py       LP-граница, lp-plan, точность оценок (M5)
-  ps_model.py, ps_policies.py  модель равного деления CPU, ps-greedy
-  qubo_place.py              QUBO эпохи и политика qubo-ps
+  policies.py                политики v1
+  bounds.py, oracle.py       LP-граница
+  ps_model.py, ps_policies.py  PS-модель, ps-greedy
+  qubo_place.py              QUBO эпохи
   qubo.py, experiment.py     QUBO-демо
   cli.py                     команда fogids
-tests/                       68 тестов
-papers/                      статьи для обзора литературы
-(не в Git) data/, artifacts/, vendor/ifogsim/, build/, .venv/, tmp/
+tests/                       тесты
+papers/                      статьи
+(не в Git) data/, artifacts/, vendor/, build/, .venv/, tmp/
 ```
