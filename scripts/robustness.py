@@ -20,7 +20,8 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 
-BASE = ROOT / 'configs/ids-place-smokescreen-x3.json'
+DEFAULT_CONFIG = ROOT / 'configs/ids-place-smokescreen-x3.json'
+BASE = DEFAULT_CONFIG  # overridden by --config
 X1 = ROOT / 'configs/ids-place-smokescreen.json'
 LARGE = ROOT / 'configs/ids-place-large-calibrated.json'
 POLICIES = ('greedy-v2', 'value-greedy-alerts', 'ps-anneal-alerts')
@@ -148,6 +149,10 @@ def policy_for(policy, variant, kw):
         suffix = f'-without-{variant}' if policy.endswith('-loo') else ''
         return DFLPSAnneal(ROOT / f'artifacts/models/value-gbm-v2{suffix}.pkl',
                            ROOT / f'artifacts/models/dfl2{suffix}.json', **kw)
+    if policy == 'ps-anneal-dfl2-specialist':  # DFL trained ONLY on this family
+        from fogids.dfl import DFLPSAnneal
+        return DFLPSAnneal(ROOT / f'artifacts/models/value-gbm-v2-only-{variant}.pkl',
+                           ROOT / f'artifacts/models/dfl2-only-{variant}.json', **kw)
     if policy == 'ps-anneal-dfl-loo':  # both models trained without this condition
         from fogids.dfl import DFLPSAnneal
         return DFLPSAnneal(ROOT / f'artifacts/models/value-gbm-without-{variant}.pkl',
@@ -248,6 +253,8 @@ def summary(rows):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--config', type=Path, default=None,
+                        help='path to scenario config JSON (default: configs/ids-place-smokescreen-x3.json)')
     parser.add_argument('--seeds', type=int, nargs='+', default=[2, 3, 4, 5, 6])
     parser.add_argument('--workers', type=int, default=2)
     parser.add_argument('--resume', action='store_true')
@@ -259,6 +266,9 @@ def main():
     parser.add_argument('--grid', action='store_true',
                         help='only the hand-tuning grid (GRID) for the given variants and policies')
     args = parser.parse_args()
+    global BASE
+    if args.config is not None:
+        BASE = (ROOT / args.config) if not args.config.is_absolute() else args.config
     args.output.mkdir(parents=True, exist_ok=True)
     path = args.output / 'runs.jsonl'
     rows = []
