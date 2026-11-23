@@ -1,0 +1,254 @@
+{
+  "variant": "f3-evasive",
+  "seeds": [
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "results": {
+    "2": {
+      "formula": {
+        "phases": {
+          "early": 0.1009,
+          "mid": 0.2533,
+          "late": 0.3,
+          "full": 0.2961
+        },
+        "mae": 38.93,
+        "mae_residual": 1.04,
+        "n_tasks": 7944
+      },
+      "gbm-specialist": {
+        "phases": {
+          "early": 0.101,
+          "mid": 0.253,
+          "late": 0.3009,
+          "full": 0.2967
+        },
+        "mae": 0.13,
+        "mae_residual": 0.04,
+        "n_tasks": 7944
+      },
+      "dfl-specialist": {
+        "phases": {
+          "early": 0.101,
+          "mid": 0.2533,
+          "late": 0.3011,
+          "full": 0.297
+        },
+        "mae": 0.13,
+        "mae_residual": 0.04,
+        "n_tasks": 7944
+      },
+      "oracle": {
+        "phases": {
+          "early": 0.101,
+          "mid": 0.2536,
+          "late": 0.3003,
+          "full": 0.2967
+        },
+        "mae": 39.57,
+        "mae_residual": 2.97,
+        "n_tasks": 7944
+      }
+    },
+    "3": {
+      "formula": {
+        "phases": {
+          "early": 0.1166,
+          "mid": 0.2516,
+          "late": 0.3376,
+          "full": 0.3259
+        },
+        "mae": 39.78,
+        "mae_residual": 0.98,
+        "n_tasks": 7901
+      },
+      "gbm-specialist": {
+        "phases": {
+          "early": 0.1166,
+          "mid": 0.2591,
+          "late": 0.3423,
+          "full": 0.3315
+        },
+        "mae": 0.16,
+        "mae_residual": 0.05,
+        "n_tasks": 7901
+      },
+      "dfl-specialist": {
+        "phases": {
+          "early": 0.1166,
+          "mid": 0.2522,
+          "late": 0.3346,
+          "full": 0.3249
+        },
+        "mae": 0.14,
+        "mae_residual": 0.05,
+        "n_tasks": 7901
+      },
+      "oracle": {
+        "phases": {
+          "early": 0.1166,
+          "mid": 0.2523,
+          "late": 0.3437,
+          "full": 0.3305
+        },
+        "mae": 40.44,
+        "mae_residual": 2.98,
+        "n_tasks": 7901
+      }
+    },
+    "4": {
+      "formula": {
+        "phases": {
+          "early": 0.1477,
+          "mid": 0.274,
+          "late": 0.3192,
+          "full": 0.3203
+        },
+        "mae": 38.1,
+        "mae_residual": 1.04,
+        "n_tasks": 7930
+      },
+      "gbm-specialist": {
+        "phases": {
+          "early": 0.1097,
+          "mid": 0.2727,
+          "late": 0.3236,
+          "full": 0.3201
+        },
+        "mae": 0.13,
+        "mae_residual": 0.04,
+        "n_tasks": 7930
+      },
+      "dfl-specialist": {
+        "phases": {
+          "early": 0.1097,
+          "mid": 0.273,
+          "late": 0.3203,
+          "full": 0.3179
+        },
+        "mae": 0.13,
+        "mae_residual": 0.04,
+        "n_tasks": 7930
+      },
+      "oracle": {
+        "phases": {
+          "early": 0.1097,
+          "mid": 0.2749,
+          "late": 0.3195,
+          "full": 0.3181
+        },
+        "mae": 38.73,
+        "mae_residual": 2.96,
+        "n_tasks": 7930
+      }
+    },
+    "5": {
+      "formula": {
+        "phases": {
+          "early": 0.0839,
+          "mid": 0.2894,
+          "late": 0.3066,
+          "full": 0.3108
+        },
+        "mae": 38.9,
+        "mae_residual": 1.03,
+        "n_tasks": 7873
+      },
+      "gbm-specialist": {
+        "phases": {
+          "early": 0.084,
+          "mid": 0.2886,
+          "late": 0.3121,
+          "full": 0.3144
+        },
+        "mae": 0.16,
+        "mae_residual": 0.04,
+        "n_tasks": 7873
+      },
+      "dfl-specialist": {
+        "phases": {
+          "early": 0.084,
+          "mid": 0.289,
+          "late": 0.3082,
+          "full": 0.3124
+        },
+        "mae": 0.15,
+        "mae_residual": 0.04,
+        "n_tasks": 7873
+      },
+      "oracle": {
+        "phases": {
+          "early": 0.084,
+          "mid": 0.2906,
+          "late": 0.309,
+          "full": 0.3138
+        },
+        "mae": 39.53,
+        "mae_residual": 2.95,
+        "n_tasks": 7873
+      }
+    },
+    "6": {
+      "formula": {
+        "phases": {
+          "early": 0.1166,
+          "mid": 0.2627,
+          "late": 0.3065,
+          "full": 0.3087
+        },
+        "mae": 39.76,
+        "mae_residual": 1.06,
+        "n_tasks": 7932
+      },
+      "gbm-specialist": {
+        "phases": {
+          "early": 0.1166,
+          "mid": 0.2628,
+          "late": 0.3081,
+          "full": 0.3101
+        },
+        "mae": 0.13,
+        "mae_residual": 0.04,
+        "n_tasks": 7932
+      },
+      "dfl-specialist": {
+        "phases": {
+          "early": 0.1166,
+          "mid": 0.2633,
+          "late": 0.3082,
+          "full": 0.3105
+        },
+        "mae": 0.13,
+        "mae_residual": 0.04,
+        "n_tasks": 7932
+      },
+      "oracle": {
+        "phases": {
+          "early": 0.1166,
+          "mid": 0.2626,
+          "late": 0.3076,
+          "full": 0.3098
+        },
+        "mae": 40.39,
+        "mae_residual": 2.96,
+        "n_tasks": 7932
+      }
+    }
+  },
+  "means": {
+    "formula": 0.31235999999999997,
+    "gbm-specialist": 0.31456,
+    "dfl-specialist": 0.31254,
+    "oracle": 0.31378000000000006
+  },
+  "gap": {
+    "total": -0.0014200000000000879,
+    "gbm": -0.0022000000000000353,
+    "dfl": 0.0020200000000000218,
+    "remaining": -0.0012400000000000744
+  }
+}

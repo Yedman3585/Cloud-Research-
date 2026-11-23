@@ -8,4 +8,7 @@ build/
 tmp/
 artifacts/*
 !artifacts/.gitkeep
+!artifacts/robustness/
+!artifacts/robustness-tonot/
+!artifacts/diagnostic/
 data/
