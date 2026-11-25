@@ -49,37 +49,37 @@
   "models": [
     {
       "name": "light",
-      "fixed_mi": 0.344064,
-      "mi_per_flow": 0.000637,
+      "fixed_mi": 0.134713,
+      "mi_per_flow": 0.000283,
       "memory_mb": 5,
       "load_s": 0.0057,
       "recall": {
-        "ddos": 0.9851,
-        "dos": 0.9732,
+        "ddos": 0.9854,
+        "dos": 0.9846,
         "mirai": 1.0,
-        "recon": 0.9968,
+        "recon": 0.995,
         "spoofing": 1.0,
         "web": 0.998,
-        "bruteforce": 0.9997
+        "bruteforce": 0.9993
       },
-      "false_positive_rate": 0.285
+      "false_positive_rate": 0.2848
     },
     {
       "name": "full",
-      "fixed_mi": 0.696943,
-      "mi_per_flow": 0.001359,
+      "fixed_mi": 0.212916,
+      "mi_per_flow": 0.002323,
       "memory_mb": 35,
       "load_s": 0.0025,
       "recall": {
         "ddos": 0.9858,
-        "dos": 0.9997,
+        "dos": 0.999,
         "mirai": 1.0,
-        "recon": 0.9992,
+        "recon": 0.9993,
         "spoofing": 1.0,
-        "web": 0.9983,
-        "bruteforce": 0.9973
+        "web": 0.9977,
+        "bruteforce": 0.9985
       },
-      "false_positive_rate": 0.0927
+      "false_positive_rate": 0.1296
     }
   ],
   "traffic": {
